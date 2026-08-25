@@ -37,6 +37,13 @@ this file, not against expectations.
 | Exception typing accuracy | 100.00% | 1 / 1 |
 | Throughput | 437 records in 105 ms | ~4,160 rec/s |
 | Quarantined rows | 0 | — |
+| **Clean clone -> working demo** | **57 s** | gate: < 300 s |
+
+Clean-clone gate measured for real, not estimated: `git clone` + fresh venv +
+`pip install -e ".[dev]"` + `python -m recon demo` = **57 s** (56 s of it is pip;
+the demo itself is 1 s). Verified on Windows with no `uv` and no `make`, and with
+no network access needed after install. The decision to hold dependencies at
+pydantic + pytest is what buys this margin.
 
 Statement: gross Rs 5,18,101.78 − cash Rs 4,33,079.04 − variance Rs 10,467.68 −
 exceptions Rs 74,555.06 = **Rs 0.00**. Journal: 5 entries, all balanced.
