@@ -35,7 +35,7 @@ append-only audit trail.
 python -m venv .venv && .venv/Scripts/activate     # Windows;  source .venv/bin/activate elsewhere
 pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report
-pytest                                              # 90 tests
+pytest                                              # 91 tests
 ```
 
 `make demo` forwards to the same entrypoint for reviewers who have GNU make. No network access and no

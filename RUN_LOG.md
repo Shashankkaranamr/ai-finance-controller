@@ -20,7 +20,7 @@ this file, not against expectations.
 | 4 | Statement foots to zero, non-zero exit if not | **PASS** |
 | 5 | One typed `MISSING_BANK_CREDIT` with evidence chain | PASS |
 | 6 | Two runs byte-identical `metrics.json` | PASS (sha256 `83f6c531…`, twice) |
-| 7 | `pytest` green incl. identities + no-floats | PASS — **90 tests** |
+| 7 | `pytest` green incl. identities + no-floats | PASS — **91 tests** |
 
 ### Numbers
 
