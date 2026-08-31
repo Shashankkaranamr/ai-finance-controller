@@ -12,10 +12,10 @@
 
 | | |
 |---|---|
-| **Current increment** | 1 — Faithful generator **[CLOSED 31 Aug]** · next: Increment 2, Tier 1 |
+| **Current increment** | 2 — Tier 1 decomposition **[OPEN 01 Sep]** · pivot decided: ACCEPT (D-016) |
 | **Deadline** | 05 Sep 2026 — **confirmed with user** (not published on razorpay.com/buildathon) |
 | **Today** | 31 Aug 2026 |
-| **Elapsed / remaining** | 8 of 13 days elapsed (62%) · **5 days remain** · engine work stops 03 Sep · **scope cut at this gate** |
+| **Elapsed / remaining** | 9 of 13 days elapsed (69%) · **4 days remain** · engine work stops 03 Sep · scope cut at the Inc 1 gate |
 | **Hard stop on engine work** | 03 Sep — Increment 6 needs 2 protected days (3 of the 4 deliverables) |
 | **Public repo** | github.com/Shashankkaranamr/ai-finance-controller — live |
 
@@ -256,6 +256,104 @@ scenario · any UI · ablation table · `ARCHITECTURE.md`.
 
 ---
 
+## INCREMENT 2 — Tier 1 arithmetic variance decomposition  **[OPEN 01 Sep 2026]**
+
+**Goal:** Close the residual. Type every remaining component of the gross-to-cash gap from the
+report's own fields and the contracted rate card, so a settlement reaches `EXPLAINED` with
+`residual == 0` and the ledger can post it. Detect fees charged off-contract. Measure the result on
+both seeds, and measure honestly how much of that result is circular.
+
+**The pivot is decided: (A) ACCEPT.** Tier 1 closes the loop; the LLM is confined to narration
+parsing, where a real measured gap already exists. Multi-gateway is **fully cut, not deferred**
+(D-016). Three engine days remain (01-03 Sep), and manufacturing ambiguity to give the LLM a job is close enough
+to the §9 "agent as marketing" anti-pattern that a panel would read the ablation as staged.
+
+### What Tier 1 does, and where the line is
+
+Tier 0 reads the fee and tax the report *states* and checks §3.2's identities over them. Tier 1 is
+the first tier with a second, independent opinion: the contracted rate card in `domain/rates.py`.
+
+Two jobs, and they are different:
+
+**(a) Close the residual.** Type the components Tier 0 cannot: refund offset, transfer out,
+chargeback reversal, chargeback fee, rolling reserve, reserve release, instant settlement fee.
+
+**(b) Detect off-contract fees.** Compare reported fee against the slab for that
+`method` x `card_network` x `card_type`. Note this does **not** move the residual: Tier 0's MDR
+component is built from the fee actually charged, so an overcharge produces a decomposition that is
+wrong but internally consistent. `MDR_SLAB_MISMATCH` is recoverable money, not unexplained money.
+It is the 83/80 out-of-remit misses from Increment 1, and it is what moves them in-remit.
+
+`BUILT_TIER` goes 0 -> 1 **in the same commit that lands the resolver**, never ahead of it.
+
+### The circularity condition — the reason this gate is not just "explanation rate went up"
+
+The eval seed is a different world drawn from the **same rule constants**: reserve 500 bps, GST
+1800 bps, chargeback fee Rs 1,500, the same MDR slabs. So a high explanation rate on eval shows the
+rules apply correctly to unseen *instances*. It does **not** show the rules were discovered rather
+than assumed, and it says nothing about a merchant on a different contract. This is D-015's
+circularity resurfacing one tier up, and it must not be reported as generalization.
+
+It is measurable rather than merely confessable, because the derived report **does not carry a
+`component` field** — Tier 1 has to infer what an adjustment is. How it infers is exactly the axis
+that matters, so every typed component is partitioned three ways and the split is published:
+
+| Class | Typed from | Circular? |
+|---|---|---|
+| **Schema-derived** | documented §3.1 fields: `type == refund`, `type == transfer`, `dispute_id` present | **No.** The gateway asserts it; we would read the same field from a real report |
+| **Contract-derived** | a rate-card constant a real controller also holds: per-dispute fee, reserve rate, instant fee rate | **Partly.** The constant is contractual, not invented — but we generated with it too |
+| **Narrative-derived** | free text we wrote (`description`, `notes`) | **Yes, fully.** Also §9 fuzzy matching. **Banned** — see below |
+
+**`description` and `notes` are off limits to the resolver.** "Rolling reserve withheld" is a string
+we authored; typing an adjustment off it would be circular AND the fuzzy string matching §9 names as
+the number one thing that sinks the submission. Reserve is identified arithmetically — an adjustment
+debit equal to `round_half_up(settled credits x 500bps)` — and `notes` may appear in *evidence* but
+never in the decision. Enforced by a test, not a convention.
+
+Expected shape from Increment 1's residual: refunds + transfers + chargebacks are schema-derived
+(~54% of movement), reserve + release + instant fee are contract-derived (~45%). **Publishing that
+split, with the caveat attached, is gate condition 5.** If it lands very differently, that is itself
+the finding.
+
+### Exit gate
+
+Numbers on **both seeds**, dev and eval, every one of them.
+
+1. **Explanation rate (bank credits) AND settlement coverage**, together, never one alone (D-005).
+   Measured, not targeted — if Tier 1 leaves a residual, that is the result.
+2. **Every `EXPLAINED` edge has `residual == 0` with every component typed.** Any settlement Tier 1
+   cannot close carries `AMOUNT_VARIANCE_UNEXPLAINED` with the amount stated.
+3. `BUILT_TIER == 1`, and **false-clear in remit == 0.00%** — now with a larger denominator, since
+   `MDR_SLAB_MISMATCH`, `RESERVE_WITHHELD` and `RESERVE_RELEASE_UNMATCHED` become in-remit.
+4. **`MDR_SLAB_MISMATCH` detection recall**, against the 83 dev / 80 eval injected at Inc 1.
+5. **The circularity partition, published**: explained money split schema-derived vs
+   contract-derived, with an explicit written statement of what the eval number does and does not
+   prove. Flagged either way, per the standing instruction.
+6. **The ablation table falls out**: explanation rate at Tier 0 alone vs Tier 0+1, both seeds. Tier
+   is an edge attribute, so this is a group-by, not a second run (invariant 5).
+7. **Journal entries now post.** Every one balances; the statement still foots to zero on both
+   seeds. This is the Increment 4 tail arriving on its own once settlements are explainable.
+8. Determinism per seed: byte-identical `metrics.json`, holding across regeneration.
+9. `pytest` green; the float scan still total over the whole package.
+10. Clean clone still inside the 300 s gate.
+
+### Deliberately NOT in Increment 2
+
+Any LLM call · Tier 2 subset-sum · multi-gateway (CUT) · second merchant (CUT) · FX (CUT) · UI ·
+`ARCHITECTURE.md`. The verifier gate and `blocked_hallucination` stay with the LLM increment, where
+they have something to verify.
+
+### Open uncertainties (Increment 2)
+
+| # | Uncertainty | Why uncertain | How Inc 2 resolves it |
+|---|---|---|---|
+| 1 | Can reserve be identified without reading our own prose? | The §3.1 schema has no field saying "this debit is a reserve"; the only honest discriminator is arithmetic | Type it by `round_half_up(credits x 500bps)` and measure how often that is unambiguous |
+| 2 | Can a reserve release be tied to its originating cycle arithmetically? | `notes` carries the answer, and `notes` is banned | Match on amount + hold period against prior cycles; unmatched becomes `RESERVE_RELEASE_UNMATCHED` |
+| 3 | Does anything remain unexplained after Tier 1? | Inc 1 says no, but by construction | Measure. A non-zero residual is the more interesting outcome |
+| 4 | Does the chargeback fee/reversal split survive without `description`? | Both carry `dispute_id`; only the contracted fee amount separates them | Split on the rate-card constant and count misclassifications |
+
+---
+
 ## Deviations from the brief, and why
 
 The brief called itself a hypothesis and asked to be argued with. Five positions, load-bearing enough
@@ -345,11 +443,11 @@ the end is panic.
 | 1 | Forward cash forecast | **CUT** | Unchanged since 25 Aug |
 | 2 | Second / third merchant scenario | **CUT — decided** | Was "Inc 1 decides". One merchant with a mixed instrument profile carries the difficulty; a second doubles generator surface for zero new break shapes (D-011) |
 | 3 | FX / international settlement | **CUT — decided** | A second currency threaded through the money type buys one exception code (D-011) |
-| 4 | Tier 2 subset-sum | **CONDITIONAL — now doubtful** | Inc 1 measured the residual as 100% typed-component-shaped. Nothing yet needs a search. Decide at the Inc 2 gate on the post-Tier-1 residual, not before (D-015) |
+| 4 | Tier 2 subset-sum | **CUT 01 Sep** | Followed multi-gateway. With no manufactured ambiguity there is nothing for a search to search, and Inc 1 measured zero scatter (D-016) |
 | 5 | Increment 4 and 5 as separate increments | **MERGED into Inc 2's tail** | Most of both already exists: statement foots, journal entries balance, exception queue is typed and prioritised, degraded mode runs on every run, audit log and determinism are in place. What remains is the verifier gate and `blocked_hallucination`, which belong with the LLM |
 | 6 | Live Razorpay test-mode adapter | Interface only | `SettlementSource` exists; impl only if Inc 6 has slack |
 | 7 | Streamlit UI beyond one screen | Deferred | The video needs one screen |
-| 8 | Multi-gateway collision class | **Held as the lever, now the ONLY candidate** | If Inc 2 confirms Tier 1 closes the residual, this is the only cheap way to manufacture genuine Tier-2 ambiguity — and the honest alternative is to say the data does not contain any (D-015) |
+| 8 | Multi-gateway collision class | **CUT 01 Sep — decided, not deferred** | The lever is closed. Building difficulty in order to justify the LLM is the §9 anti-pattern; the honest line is that arithmetic closes this loop and the LLM earns its place only in narration parsing (D-016) |
 | 9 | TDS 194-O | Out by persona | Defend the decision, not the mechanics |
 | — | **Never cut** | — | Held-out seed · false-clear metric · degraded mode · Increment 6 |
 
@@ -558,4 +656,34 @@ either a deliberate decision to accept a Tier-1-closes-it submission (in which c
 defensible place is narration extraction, and the measured 100% → 0-of-22 parse gap is the argument
 for it), or the multi-gateway lever pulled to manufacture real ambiguity. Decide at the Inc 2 gate,
 on the post-Tier-1 residual.
+**Supersedes:** —
+
+### D-016 · Increment 2 · 2026-09-01 · The pivot is ACCEPT. Multi-gateway is fully CUT, not deferred
+**Decision:** Tier 1 arithmetic closes the residual and the submission says so. The LLM is confined
+to narration parsing. `MULTI_GATEWAY_COLLISION` is **cut outright** — removed from the lever
+position it held on the cut list since 25 Aug, not deferred to a later gate.
+**Why:** Two reasons, and the second is the stronger. Scheduling: three engine days remain (01-03 Sep), and a
+second gateway means generator work, Tier 0 and Tier 1 extension, *and* Tier 2 subset-sum on top --
+it does not fit. Substance: the only purpose of building it would be to manufacture ambiguity so the
+LLM has something to adjudicate, and §9 names "agent as marketing" an anti-pattern explicitly. An
+ablation over difficulty we invented to justify a component is staged, and a panel reads it that way.
+The honest submission is that deterministic arithmetic closes this loop, and the LLM earns its place
+exactly where deterministic parsing does not generalise — a claim we already have a measured number
+for (100.00% dev vs 0 of 22 held-out settlement narrations).
+**What it rules out:** `MULTI_GATEWAY_COLLISION` as a declared exception type, Tier 2 subset-sum, and
+any "the LLM resolves ambiguous matches" claim. The ablation table will show the LLM adding nothing
+to the arithmetic and everything to extraction. That is the result, not a disappointment, and it is
+reported as such.
+**Supersedes:** amends the cut list's rank-8 "held as the lever" entry, which is now closed.
+
+### D-017 · Increment 2 · 2026-09-01 · The resolver may not read `description` or `notes`
+**Decision:** Tier 1 types adjustments from documented §3.1 fields (`type`, `dispute_id`) and from
+contracted rate-card constants, never from the free-text `description` or `notes`. Enforced by test.
+**Why:** Those strings are ours. "Rolling reserve withheld" types an adjustment perfectly and proves
+nothing except that we can read our own generator, which is D-015's circularity in its purest form.
+It is also the fuzzy string matching §9 names as the single thing most likely to sink the
+submission. Banning it forces reserve to be identified arithmetically, which is a real derivation a
+controller could run against a real report.
+**What it rules out:** Any keyword or regex classification of adjustment lines. `notes` may appear in
+an exception's *evidence* for a human to read; it may never enter a resolver's decision.
 **Supersedes:** —
