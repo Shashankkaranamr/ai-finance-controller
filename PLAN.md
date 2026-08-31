@@ -286,3 +286,19 @@ that runs the dev seed under an "eval" name would be worse than its absence.
 **What it rules out:** Reporting any number as "held-out" before Increment 1. The `SettlementSource`
 protocol *was* built (`ingest/source.py`) as promised, since that seam constrains later design.
 **Supersedes:** —
+
+### D-008 · Increment 0 (post-gate) · 2026-08-31 · The working copy lives at `C:\dev\ai-finance-controller`, off OneDrive
+**Decision:** Move the repo out of the OneDrive-synced path to `C:\dev\ai-finance-controller`. Open
+Uncertainty #5 above still names "OneDrive I/O on the repo path" as a risk to the clean-clone gate;
+that line stands as written (this log is append-only) and is retired here.
+**Why:** `out/<seed>/` and `data/generated/<seed>/` are rewritten on every run, so a synced path puts a
+background uploader on exactly the files the determinism contract (invariant 2) covers, and adds
+unmeasured I/O to the one gate condition that is a wall-clock number. Verified after the move: tree
+byte-identical, `pytest` 91 green, and two `recon run --seed dev` invocations both produce
+`metrics.json` sha256 `83f6c531…` — the same hash recorded at the Increment 0 gate *before* the move.
+Determinism therefore holds across the move, not merely at the new path.
+**What it rules out:** Attributing any later flaky write, timing outlier, or non-reproducible artifact
+to OneDrive — that explanation is now closed and the cause would have to be found in our code. Also
+removes sync latency from the clean-clone number, re-measured in `RUN_LOG.md` against a fresh venv.
+Reopens only if the repo is moved back under a synced path, which nothing requires.
+**Supersedes:** — (retires the OneDrive risk in Open Uncertainty #5; does not amend it)
