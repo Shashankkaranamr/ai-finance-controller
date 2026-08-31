@@ -12,12 +12,12 @@
 
 | | |
 |---|---|
-| **Current increment** | 0 — Walking Skeleton **[CLOSED 25 Aug]** · next: Increment 1 |
+| **Current increment** | 1 — Faithful generator **[OPEN 31 Aug]** · Inc 0 closed 25 Aug |
 | **Deadline** | 05 Sep 2026 — **confirmed with user** (not published on razorpay.com/buildathon) |
-| **Today** | 25 Aug 2026 |
-| **Elapsed / remaining** | 2 of 13 days elapsed · **11 days remain** |
+| **Today** | 31 Aug 2026 |
+| **Elapsed / remaining** | 8 of 13 days elapsed · **5 days remain** · engine work stops 03 Sep |
 | **Hard stop on engine work** | 03 Sep — Increment 6 needs 2 protected days (3 of the 4 deliverables) |
-| **Public repo** | github.com/Shashankkaranamr — confirmed, create and push during Inc 0 |
+| **Public repo** | github.com/Shashankkaranamr/ai-finance-controller — live |
 
 ---
 
@@ -48,7 +48,7 @@ Stated and proceeding per §13.4 ("assume, don't block"). Each names the gate at
 
 ---
 
-## INCREMENT 0 — Walking Skeleton
+## INCREMENT 0 — Walking Skeleton  **[CLOSED 25 Aug 2026]**
 
 **Goal:** Prove the reconciliation grain model, the ground-truth schema and the metric denominators
 by running one command end to end on clean synthetic data into real artifacts — including a
@@ -109,6 +109,123 @@ against a 5-minute gate.
 **Time:** Inc 0 target 1 day. 11 days remain. Engine work stops 03 Sep.
 
 **Next (tentative, one line):** Faithful generator — full §3.1 schema, anomaly injection, dev + held-out seeds.
+
+---
+
+## INCREMENT 1 — Faithful generator
+
+**Goal:** Replace Increment 0's clean, payments-only world with data a controller would recognise —
+the full §3.1 schema, the whole Indian deduction stack, refunds and disputes crossing cycles, and
+anomalies injected at realistic rates across two seeds, one of them held out. Increment 1 adds
+**no new resolver capability**. Its deliverable is data, plus the measurement that decides what
+Increment 2 has to be.
+
+Increment 0 locked the three expensive things — the grain, the ground-truth schema, the metric
+denominators. Increment 1 loads them.
+
+### The measurement this increment exists to produce
+
+§13.1 makes the Inc 2 pivot depend on the residual distribution. That distribution is a property of
+the *data*, and it cannot be read off a generator that does not exist yet. So the gate is not "the
+generator runs". It is: **here is the unexplained money, bucketed by its true component type, and
+here is therefore how much of the gap an arithmetic Tier 1 could possibly reach.**
+
+**Tier 0's explanation rate will fall hard. That is the finding, not a regression.** Tier 0 reads the
+`fee` and `tax` the source reports and checks §3.2's identities. It knows nothing about rolling
+reserve, chargeback reversals or refund offsets. The moment those enter the world,
+`gross − cash − MDR − GST` stops landing on zero for most settlements. Recording that fall *is* the
+justification for building Tier 1. Reading it as a regression and "fixing" Tier 0 would be doing
+Increment 2's work inside Increment 1, against the one rule this repo most wants kept.
+
+**So the "is the data too clean?" question is answered from ground truth, not from the resolver.**
+CLAUDE.md targets 85–92% cleanly resolvable. Tier 0's post-Inc-1 score measures Tier 0's ignorance of
+a deduction stack, not the data's difficulty — the two numbers answer different questions and only one
+of them is the open question. Inc 1 therefore adds an intrinsic **clean rate**: units carrying no
+injected anomaly, over all units, computed from `ground_truth.json` alone with no resolver involved.
+That is the number checked against 85–92%. Tier 0's explanation rate is recorded beside it.
+
+### Scope
+
+**The world (`generate/world.py`).** One merchant, net settlement, single gateway — mixed method
+profile (UPI-heavy, with enough card volume to carry disputes and a reserve). Cut-list rank 7,
+"second/third merchant scenario", **stays deferred**: a second merchant doubles the generator surface
+without producing a single new *break shape*, and the difficulty the brief wants from a card-heavy
+merchant can live inside one merchant's method mix. FX stays cut — it needs a second currency
+threaded through the money type for one exception code.
+
+**The deduction stack (§3.3), all of it except TDS 194-O** (out by persona, Assumption 1):
+MDR by slab · GST on MDR · rolling reserve withheld · reserve release matched back to its originating
+cycle · refund offset · chargeback reversal · chargeback fee.
+
+**Line types.** All four of `payment | refund | transfer | adjustment`, each non-trivial. ID prefixes
+mirrored exactly: `pay_ rfnd_ trf_ adj_ order_ setl_ setlod_ setlodp_`.
+
+**Timing (§3.4).** T+2 on a batched cycle; refunds and chargebacks that debit a later cycle than the
+payment they reverse; a month-end straddle where books and bank correctly disagree; `on_hold` lines
+captured but never settled; instant `setlod_*` settlements interleaved with the scheduled cycle.
+
+**Rates (`domain/rates.py`, new).** The flat 200 bps of Inc 0 becomes a real slab table keyed by
+`method` × `card_network` × `card_type`, in integer basis points. `RULE_VERSION` bumps. Only at this
+point does `MDR_SLAB_MISMATCH` mean anything, which is why Inc 0 did not pretend to have it.
+
+**Anomaly injection (`generate/anomalies.py`, new).** Controlled, declared rates, every one tagged in
+ground truth at injection time. Never labelled after the fact.
+
+**Two seeds.** `dev` and a held-out `eval`. The eval seed generates from **eval-only** narration
+families (deviation #4), so the Inc 3 ablation is held out at the template level and not merely at
+the seed level. `parse_utr` hit rate is reported per split — that gap is the LLM's justification, or
+its refutation.
+
+**The `eval` subcommand** ships here, closing D-007.
+
+### Exit gate
+
+1. **Scale:** 1,000–2,000 settlement line items, 60–90 days, 15–25 settlement cycles, on each seed.
+2. **Schema:** every §3.1 field emitted; all four `type` values present and non-trivial; ID prefixes exact.
+3. **Stack:** MDR (slab), GST, reserve withheld, reserve release, refund offset, chargeback reversal
+   and chargeback fee all present in the world *and* carried in `ground_truth.json` as typed components.
+4. **Intrinsic clean rate lands in 85–92% on both seeds**, computed from ground truth alone.
+   Outside that band, the generator is wrong and gets fixed before Increment 2 starts.
+5. **One declared expected-to-fail class, and it does fail:** `REFUND_ORPHANED` where the original
+   payment predates the extract window. Chosen because it is *structurally* unknowable rather than
+   merely hard — no tier, including an LLM, can link a refund to a payment that is not in the data.
+   Named in the README as a blind spot.
+6. **Held-out split is real:** eval seed renders from eval-only families; `parse_utr` hit rate
+   reported separately for dev and eval.
+7. **Residual distribution published:** Tier 0's unexplained money bucketed by *true* component type
+   from ground truth. This is the Increment 2 input and the reason the gate exists.
+8. **False-clear rate still 0.00%** on both seeds. Non-negotiable — it is on the never-cut list.
+9. **Determinism per seed:** two runs, byte-identical `metrics.json`, on `dev` and on `eval`.
+10. **Statement still foots to zero on both seeds**; journal entries still balance. The stack is new
+    money moving through the entity model, and this is what proves the model absorbed it.
+11. `pytest` green. Float-free scan still total. New identities property-tested.
+12. Clean-clone demo still inside the 300 s gate at ~3× the record count.
+
+### Expected learning
+
+- **The residual distribution** — mechanical and typeable, or scattered and ambiguous? This is the
+  Inc 2 fork, and both branches are good submissions.
+- **Whether `REFUND_TO_PAYMENT` survives contact with cross-cycle refunds.** Declared on hypothesis in
+  Inc 0, unexercised, and named in CLAUDE.md as the part of the grain model most likely to be wrong.
+  Inc 1 is where it either holds or breaks.
+- **Whether the footing identity survives the deduction stack.** It footed trivially on clean data.
+  Reserve is a receivable and not cash, which is precisely the shape that breaks a naive statement.
+- **How far the dev-only parser actually falls on eval narrations.** A small gap weakens the LLM case
+  and should be reported as such.
+
+### Deliberately NOT in Increment 1
+
+Tier 1 decomposition · Tier 2 · any LLM call · TDS 194-O · FX · multi-gateway · second merchant
+scenario · any UI · ablation table · `ARCHITECTURE.md`.
+
+### Open uncertainties (Increment 1)
+
+| # | Uncertainty | Why uncertain | How Inc 1 resolves it |
+|---|---|---|---|
+| 1 | Does `REFUND_TO_PAYMENT` hold across cycles? | Declared on hypothesis in Inc 0 and never exercised | Generate cross-cycle refunds and see whether a binary edge expresses them |
+| 2 | Can the statement still foot with a rolling reserve? | Reserve is a receivable, not cash — a naive statement double-counts or drops it | Assert footing on both seeds; a failure here is the most valuable finding available |
+| 3 | Is 85–92% reachable by construction? | Injection rates compose in ways that are hard to predict — anomalies overlap on the same unit | Measure intrinsic clean rate from ground truth and tune rates against it, not against expectations |
+| 4 | How large is the dev/eval narration gap? | We wrote both sides; the gap could be trivial | Report `parse_utr` hit rate per split as a first-class number |
 
 ---
 
