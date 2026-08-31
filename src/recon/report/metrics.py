@@ -28,7 +28,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..domain.graph import BUILT_TIER, ComponentType, EdgeKind, EdgeStatus, ExceptionType, ReconEdge
+from ..domain.graph import (BUILT_TIER, ComponentType, EdgeKind, EdgeStatus,
+                            ExceptionType, ReconEdge, Tier)
 from ..domain.truth import GroundTruth
 from ..generate.narration import parse_utr
 from ..money import Paise, format_bps, format_inr, ratio_bps
@@ -80,6 +81,7 @@ class Metrics:
     residual_by_component: dict[str, int] = field(default_factory=dict)
     injected_by_class: dict[str, int] = field(default_factory=dict)
     explained_by_basis: dict[str, int] = field(default_factory=dict)
+    ablation: dict[str, dict] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict:
@@ -125,6 +127,11 @@ class Metrics:
             # same from a real report; CONTRACT money is derived from a rate-card
             # constant we also generated with, so it is partly circular. Published
             # so the limit of the eval result is a number, not a caveat in prose.
+            # BRIEF Sec 7's ablation. NOT a second run: tier is an attribute of an
+            # EDGE (invariant 5), so "what would we have got with only tier <= N"
+            # is a group-by over the edges we already have. That is the entire
+            # reason tier was put on the edge rather than on the row.
+            "ablation": dict(sorted(self.ablation.items())),
             "decomposition": {
                 "closure": self.decomposition_closure.to_json(),
                 "explained_by_basis": dict(sorted(self.explained_by_basis.items())),
@@ -168,6 +175,15 @@ class Metrics:
             "DATA REALISM (from ground truth, no resolver involved)",
             "  " + self.intrinsic_clean_rate.line(),
             "  " + self.narration_parse_rate.line(),
+            "",
+            "ABLATION -- headline grain, cumulative by tier (a group-by, not a re-run)",
+        ]
+        for name, row in sorted(self.ablation.items()):
+            lines.append(
+                f"  {name:<30} {format_bps(row['rate_bps']):>8}  "
+                f"({row['explained']}/{row['bank_credits']})"
+                + (f"   +{format_bps(row['delta_bps'])}" if row["delta_bps"] else ""))
+        lines += [
             "",
             "TIER 1 DECOMPOSITION (no linkage, no ground truth)",
             "  " + self.decomposition_closure.line(),
@@ -308,6 +324,25 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
     from ..resolve.tier1 import closure_report
 
     closed, total_settlements, explained_by_basis = closure_report(repo)
+
+    # The Sec 7 ablation, cumulative. An edge carries the tier that produced its
+    # CURRENT status, so "explained with only tier <= N" is a filter, and the
+    # table falls out by construction rather than being reconstructed later.
+    ablation: dict[str, dict] = {}
+    previous_bps = 0
+    for tier in sorted(Tier, key=lambda x: x.value):
+        if tier.value > BUILT_TIER:
+            break
+        explained_at = len([e for e in bank_edges
+                            if e.status is EdgeStatus.EXPLAINED and e.tier.value <= tier.value])
+        rate = ratio_bps(explained_at, len(repo.bank))
+        ablation[f"T{tier.value}_{tier.name.split('_', 1)[1].lower()}"] = {
+            "explained": explained_at,
+            "bank_credits": len(repo.bank),
+            "rate_bps": rate,
+            "delta_bps": rate - previous_bps,
+        }
+        previous_bps = rate
     decomposition_closure = Rate(
         closed, total_settlements,
         "decomposition closure (gross->net gap fully typed)")
@@ -372,6 +407,7 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         narration_parse_rate=narration_parse_rate,
         decomposition_closure=decomposition_closure,
         explained_by_basis=explained_by_basis,
+        ablation=ablation,
         residual_total=Paise(residual_total),
         residual_by_component=residual_by_component,
         injected_by_class=injected_by_class,
