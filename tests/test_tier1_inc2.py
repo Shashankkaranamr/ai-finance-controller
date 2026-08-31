@@ -70,7 +70,7 @@ def test_the_component_basis_enum_has_no_narrative_member():
 # --- decomposition, isolated from linkage -------------------------------------
 
 @pytest.mark.parametrize("seed", SEEDS)
-def test_decomposition_closes_the_gap_on_both_seeds(seed):
+def test_decomposition_closes_the_gap_on_both_seeds(seed, generated, generated_eval):
     """Can Tier 1 type the gross-to-net gap with no bank statement involved?
 
     This has to be measured separately from explanation rate, because on the
@@ -79,7 +79,7 @@ def test_decomposition_closes_the_gap_on_both_seeds(seed):
     has nothing to do with the arithmetic, so the headline cannot answer the
     question the Increment 2 gate actually asks.
     """
-    repo = _repo(Path("data/generated") / seed)
+    repo = _repo(generated if seed == "dev" else generated_eval)
     closed, total, by_basis = tier1.closure_report(repo)
     assert total > 0
     assert closed == total, f"{seed}: {total - closed} settlements left an untyped gap"
@@ -87,7 +87,8 @@ def test_decomposition_closes_the_gap_on_both_seeds(seed):
 
 
 @pytest.mark.parametrize("seed", SEEDS)
-def test_the_circularity_split_is_published_and_both_halves_are_real(seed):
+def test_the_circularity_split_is_published_and_both_halves_are_real(
+        seed, generated, generated_eval):
     """Gate condition 5. The eval result's honest limit, as a number.
 
     SCHEMA money is typed from documented Sec 3.1 fields the gateway asserts; we
@@ -97,7 +98,7 @@ def test_the_circularity_split_is_published_and_both_halves_are_real(seed):
     ever collapses to one side, the claim being made has changed and the gate
     should be re-argued rather than silently passed.
     """
-    repo = _repo(Path("data/generated") / seed)
+    repo = _repo(generated if seed == "dev" else generated_eval)
     _, _, by_basis = tier1.closure_report(repo)
     assert set(by_basis) == {"schema", "contract"}
     total = sum(by_basis.values())

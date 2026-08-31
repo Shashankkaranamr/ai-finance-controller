@@ -32,7 +32,11 @@ from recon.ingest.load import load_all
 from recon.llm.client import AdjudicationRequest, AdjudicationResult, NullAdjudicator
 from recon.resolve import pipeline
 
-EVAL_DATA = Path("data/generated/eval")
+# The held-out seed comes from the session fixture in conftest, NOT from
+# data/generated/eval in the working tree. Reading generated data off the repo
+# would make the suite pass only for someone who had just run the CLI -- it did,
+# and a clean clone failed nine of these tests while the same commit was green
+# locally. A test that depends on ambient state is not a test.
 
 
 @dataclass(slots=True)
@@ -115,10 +119,10 @@ def _oracle_for(data_dir: Path) -> TruthfulAdjudicator:
 
 # --- the fence ----------------------------------------------------------------
 
-def test_a_hostile_adjudicator_is_blocked_completely(tmp_path):
+def test_a_hostile_adjudicator_is_blocked_completely(generated_eval, tmp_path):
     """THE assertion of this increment. Every wrong UTR rejected, none accepted."""
     hostile = HostileAdjudicator()
-    result = pipeline.run(EVAL_DATA, tmp_path / "hostile", adjudicator=hostile)
+    result = pipeline.run(generated_eval, tmp_path / "hostile", adjudicator=hostile)
 
     assert hostile.seen, "the fence was never exercised -- no proposals were made"
     assert result.llm.blocked_hallucination == len(hostile.seen), (
@@ -129,10 +133,10 @@ def test_a_hostile_adjudicator_is_blocked_completely(tmp_path):
     assert not llm_edges, "a hallucinated UTR became an edge"
 
 
-def test_linkage_precision_is_unmoved_by_a_hostile_adjudicator(tmp_path):
+def test_linkage_precision_is_unmoved_by_a_hostile_adjudicator(generated_eval, tmp_path):
     """The consequence that matters: bad proposals cannot reach the ledger."""
-    clean = pipeline.run(EVAL_DATA, tmp_path / "clean", adjudicator=NullAdjudicator())
-    attacked = pipeline.run(EVAL_DATA, tmp_path / "attacked",
+    clean = pipeline.run(generated_eval, tmp_path / "clean", adjudicator=NullAdjudicator())
+    attacked = pipeline.run(generated_eval, tmp_path / "attacked",
                             adjudicator=HostileAdjudicator())
 
     assert attacked.metrics.linkage_precision.bps == 10_000
@@ -141,10 +145,10 @@ def test_linkage_precision_is_unmoved_by_a_hostile_adjudicator(tmp_path):
     assert attacked.statement.foots, "a hostile adjudicator must not unbalance the books"
 
 
-def test_a_truthful_adjudicator_is_accepted_so_the_fence_is_not_a_wall(tmp_path):
+def test_a_truthful_adjudicator_is_accepted_so_the_fence_is_not_a_wall(generated_eval, tmp_path):
     """A verifier that rejects everything proves nothing. This is the control."""
-    oracle = _oracle_for(EVAL_DATA)
-    result = pipeline.run(EVAL_DATA, tmp_path / "oracle", adjudicator=oracle)
+    oracle = _oracle_for(generated_eval)
+    result = pipeline.run(generated_eval, tmp_path / "oracle", adjudicator=oracle)
 
     assert result.llm.blocked_hallucination == 0
     llm_edges = [e for e in result.edges if e.established_by is Tier.T3_LLM]
@@ -152,7 +156,7 @@ def test_a_truthful_adjudicator_is_accepted_so_the_fence_is_not_a_wall(tmp_path)
     assert result.metrics.linkage_precision.bps == 10_000
 
 
-def test_an_oracle_raises_held_out_explanation_from_zero(tmp_path):
+def test_an_oracle_raises_held_out_explanation_from_zero(generated_eval, tmp_path):
     """The UPPER BOUND on what any adjudicator could contribute -- not a claim
     about Claude, which is unmeasured here for want of an API key.
 
@@ -161,10 +165,10 @@ def test_an_oracle_raises_held_out_explanation_from_zero(tmp_path):
     supplied, Tier 1 explains the money exactly as it does on dev -- which
     localises the entire held-out failure to narration parsing.
     """
-    baseline = pipeline.run(EVAL_DATA, tmp_path / "base", adjudicator=NullAdjudicator())
+    baseline = pipeline.run(generated_eval, tmp_path / "base", adjudicator=NullAdjudicator())
     assert baseline.metrics.explanation_rate_bank.numerator == 0
 
-    lifted = pipeline.run(EVAL_DATA, tmp_path / "lifted", adjudicator=_oracle_for(EVAL_DATA))
+    lifted = pipeline.run(generated_eval, tmp_path / "lifted", adjudicator=_oracle_for(generated_eval))
     assert lifted.metrics.explanation_rate_bank.numerator > 0
     assert lifted.statement.foots
     for entry in lifted.journal:
@@ -173,11 +177,11 @@ def test_an_oracle_raises_held_out_explanation_from_zero(tmp_path):
 
 # --- scope: the adjudicator is asked about very little ------------------------
 
-def test_the_adjudicator_is_only_asked_about_narrations_the_regex_failed_on(tmp_path):
+def test_the_adjudicator_is_only_asked_about_narrations_the_regex_failed_on(generated_eval, tmp_path):
     """Consulting it about a solved narration would inflate its apparent value
     and cost money for nothing."""
     hostile = HostileAdjudicator()
-    result = pipeline.run(EVAL_DATA, tmp_path / "scope", adjudicator=hostile)
+    result = pipeline.run(generated_eval, tmp_path / "scope", adjudicator=hostile)
 
     unparseable = {r.subject_id for r in result.exceptions
                    if r.code == ExceptionType.NARRATION_UNPARSEABLE.code}
@@ -187,7 +191,7 @@ def test_the_adjudicator_is_only_asked_about_narrations_the_regex_failed_on(tmp_
     assert asked == unparseable
 
 
-def test_the_adjudicator_never_sees_money_or_candidate_answers(tmp_path):
+def test_the_adjudicator_never_sees_money_or_candidate_answers(generated_eval, tmp_path):
     """Invariant 8. It gets free text and nothing else.
 
     Handing it the amount or a list of valid UTRs would let it "extract" a value
@@ -209,7 +213,7 @@ def test_the_adjudicator_never_sees_money_or_candidate_answers(tmp_path):
             captured.append(request.payload)
             return AdjudicationResult(ok=False, reason_unavailable="spy")
 
-    pipeline.run(EVAL_DATA, tmp_path / "spy", adjudicator=Spy())
+    pipeline.run(generated_eval, tmp_path / "spy", adjudicator=Spy())
     assert captured
     for payload in captured:
         assert set(payload) == {"narration"}
@@ -217,36 +221,36 @@ def test_the_adjudicator_never_sees_money_or_candidate_answers(tmp_path):
 
 # --- failure recovery ----------------------------------------------------------
 
-def test_an_adjudicator_that_fails_every_call_degrades_rather_than_crashing(tmp_path):
+def test_an_adjudicator_that_fails_every_call_degrades_rather_than_crashing(generated_eval, tmp_path):
     """Sec 8: the batch completes at a reduced rate and says that it degraded."""
-    result = pipeline.run(EVAL_DATA, tmp_path / "broken", adjudicator=BrokenAdjudicator())
+    result = pipeline.run(generated_eval, tmp_path / "broken", adjudicator=BrokenAdjudicator())
     assert result.ok
     assert result.llm.calls_declined > 0
     assert result.llm.blocked_hallucination == 0
     assert result.metrics.linkage_precision.bps == 10_000
 
 
-def test_no_adjudicator_leaves_the_run_exactly_as_it_was(tmp_path):
+def test_no_adjudicator_leaves_the_run_exactly_as_it_was(generated_eval, tmp_path):
     """Every rules-only run is a genuine degraded-mode run, not a simulated one."""
-    result = pipeline.run(EVAL_DATA, tmp_path / "null", adjudicator=NullAdjudicator())
+    result = pipeline.run(generated_eval, tmp_path / "null", adjudicator=NullAdjudicator())
     assert result.llm.available is False
     assert result.llm.degraded is True
     assert result.llm.degraded_reason
     assert result.ok
 
 
-def test_a_run_with_an_adjudicator_is_still_byte_identical(tmp_path):
+def test_a_run_with_an_adjudicator_is_still_byte_identical(generated_eval, tmp_path):
     """Sampling is not reproducible; the cache is what makes the run so."""
-    first = pipeline.run(EVAL_DATA, tmp_path / "d1", adjudicator=_oracle_for(EVAL_DATA))
-    second = pipeline.run(EVAL_DATA, tmp_path / "d2", adjudicator=_oracle_for(EVAL_DATA))
+    first = pipeline.run(generated_eval, tmp_path / "d1", adjudicator=_oracle_for(generated_eval))
+    second = pipeline.run(generated_eval, tmp_path / "d2", adjudicator=_oracle_for(generated_eval))
     assert ((first.out_dir / "metrics.json").read_bytes()
             == (second.out_dir / "metrics.json").read_bytes())
 
 
-def test_an_llm_linked_edge_is_matched_not_explained(tmp_path):
+def test_an_llm_linked_edge_is_matched_not_explained(generated_eval, tmp_path):
     """Invariant 8, structurally. The LLM establishes linkage; the arithmetic
     still has to explain the money before anything posts to the ledger."""
-    result = pipeline.run(EVAL_DATA, tmp_path / "order", adjudicator=_oracle_for(EVAL_DATA))
+    result = pipeline.run(generated_eval, tmp_path / "order", adjudicator=_oracle_for(generated_eval))
     llm_edges = [e for e in result.edges if e.established_by is Tier.T3_LLM]
     # Any T3 edge that survived to EXPLAINED was upgraded by Tier 1 afterwards,
     # so it must carry a full decomposition rather than the LLM's say-so.
@@ -285,7 +289,7 @@ def test_the_sdk_is_not_a_hard_dependency():
     assert source[:import_line].count("def __post_init__") == 1
 
 
-def test_a_correctly_read_but_ambiguous_utr_is_still_refused(tmp_path):
+def test_a_correctly_read_but_ambiguous_utr_is_still_refused(generated_eval, tmp_path):
     """The failure the fence alone does NOT catch, and the reason it needs a second guard.
 
     Tier 0 declines to link a UTR carried by two credits, because choosing one is
@@ -297,8 +301,8 @@ def test_a_correctly_read_but_ambiguous_utr_is_still_refused(tmp_path):
     foot, which is the whole reason both are asserted rather than just the
     hallucination count.
     """
-    result = pipeline.run(EVAL_DATA, tmp_path / "ambiguous",
-                          adjudicator=_oracle_for(EVAL_DATA))
+    result = pipeline.run(generated_eval, tmp_path / "ambiguous",
+                          adjudicator=_oracle_for(generated_eval))
 
     assert result.metrics.linkage_precision.bps == 10_000
     assert result.statement.foots
@@ -314,7 +318,7 @@ def test_a_correctly_read_but_ambiguous_utr_is_still_refused(tmp_path):
 
 
 @pytest.mark.parametrize("bad", ["", "not-a-utr", "0000000000zzzzzz"])
-def test_any_unresolvable_proposal_is_blocked(tmp_path, bad):
+def test_any_unresolvable_proposal_is_blocked(generated_eval, tmp_path, bad):
     """The gate is an exact lookup, so every shape of wrong answer lands the same."""
 
     @dataclass(slots=True)
@@ -329,5 +333,5 @@ def test_any_unresolvable_proposal_is_blocked(tmp_path, bad):
         def adjudicate(self, request: AdjudicationRequest) -> AdjudicationResult:
             return AdjudicationResult(ok=True, data={"utr": bad}, rationale="confident")
 
-    result = pipeline.run(EVAL_DATA, tmp_path / f"bad{len(bad)}", adjudicator=Fixed())
+    result = pipeline.run(generated_eval, tmp_path / f"bad{len(bad)}", adjudicator=Fixed())
     assert not [e for e in result.edges if e.established_by is Tier.T3_LLM]
