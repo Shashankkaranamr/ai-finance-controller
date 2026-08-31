@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| **Current increment** | 3 — Fenced adjudicator **[OPEN 01 Sep]** · no API key: fence measured, accuracy not claimed |
+| **Current increment** | 3 — Fenced adjudicator **[CLOSED 01 Sep]** · next: Increment 6 (protected) |
 | **Deadline** | 05 Sep 2026 — **confirmed with user** (not published on razorpay.com/buildathon) |
 | **Today** | 31 Aug 2026 |
 | **Elapsed / remaining** | 9 of 13 days elapsed (69%) · **4 days remain** · engine work stops 03 Sep · scope cut at the Inc 1 gate |
@@ -354,7 +354,7 @@ they have something to verify.
 
 ---
 
-## INCREMENT 3 — The fenced adjudicator  **[OPEN 01 Sep 2026]**
+## INCREMENT 3 — The fenced adjudicator  **[CLOSED 01 Sep 2026]**
 
 **Goal:** Give the LLM exactly one job — extracting a UTR from a narration no deterministic parser
 was written for — and fence it so it cannot corrupt the ledger. Then **measure the fence**, which is
@@ -789,5 +789,47 @@ already explained — inflating the exception count, which Sec 6 names as the th
 the agent. The audit log keeps the intermediate view reconstructible.
 **What it rules out:** Tiers appending to a shared queue as if it were a log. The queue is a
 statement about now; the audit log is the history.
+**Supersedes:** —
+**Made autonomously overnight; open for review.**
+
+### D-021 · Increment 3 · 2026-09-01 · Tier 3 supplies linkage only, and runs before Tier 1
+**Decision:** The adjudicator creates `MATCHED` edges tagged `linked_by=T3_LLM`, and Tier 1 then
+explains the money. Edges carry `linked_by` separately from `tier`; an edge counts at tier N in the
+ablation only if both its linkage and its explanation are within N.
+**Why:** Invariant 8 — the LLM never computes money. Running Tier 3 after Tier 1 would leave
+LLM-linked credits permanently unexplained; letting it set `EXPLAINED` would violate the invariant
+outright. And with only one tier per edge, Tier 1's upgrade erased the adjudicator's contribution
+from both the graph and the ablation, making the LLM look useless by construction.
+**What it rules out:** Reading `tier` alone as "which tier made this possible". Also rules out any
+future tier setting `EXPLAINED` without the arithmetic engine agreeing.
+**Supersedes:** —
+**Made autonomously overnight; open for review.**
+
+### D-022 · Increment 3 · 2026-09-01 · With no API key, the fence is measured and accuracy is not claimed
+**Decision:** Build and test the adjudicator, cache, verifier gate, `blocked_hallucination`, degraded
+mode and the ablation harness. Claim **no** figure for the model's real extraction accuracy anywhere
+in the repo. The `anthropic` SDK is an optional `[llm]` extra, lazily imported.
+**Why:** There is no key in this environment. The architectural claim — a hallucination cannot become
+a match — is provable without one, by attacking the fence and counting what gets through. An accuracy
+number is not, and estimating it would be exactly the kind of unearned figure this project's logs
+exist to prevent. The oracle result is published as an explicit **upper bound**, labelled in the test
+docstring, the RUN_LOG table and here, because it is the number most likely to become a false claim
+once it travels.
+**What it rules out:** Any "the LLM recovers N% of held-out narrations" statement in the README or
+video until a key produces one. Also rules out making the SDK a hard dependency, which would break
+the clean-clone gate CLAUDE.md protects.
+**Supersedes:** —
+**Made autonomously overnight; open for review.**
+
+### D-023 · Increment 3 · 2026-09-01 · Tier 3 inherits Tier 0's refusal to link an ambiguous UTR
+**Decision:** Tier 3 skips credits already flagged `DUPLICATE_UTR`, and rejects any proposal
+resolving to a settlement that already has a bank credit. Logged as a rejection, not a hallucination.
+**Why:** The verifier gate blocks *wrong* answers. It does not block a *correct* answer to an
+ambiguous question: an adjudicator reading a duplicated UTR is right, the lookup succeeds, and Tier 3
+would make precisely the link Tier 0 declines to make on a coin flip (D-014). Measured cost of not
+having this: linkage precision 99.97% and a statement that no longer foots.
+**What it rules out:** Treating "the verifier passed it" as sufficient. Counted separately from
+`blocked_hallucination` because conflating them would overstate the hallucination rate and hide a
+distinct failure mode — the model was correct and the DATA was ambiguous.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**

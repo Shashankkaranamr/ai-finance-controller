@@ -412,3 +412,106 @@ sharp: Tier 1 closes 100% of the gaps it is given, and the *only* thing standing
 held-out seed and the same 83% explanation rate is that the deterministic parser scores **0 of 22**
 on settlement narrations it has never seen. The LLM has exactly one job, it is the job it is best
 at, and the ablation number for "without it" is already published.
+
+---
+
+## Increment 3 — The fenced adjudicator · gate reached 01 Sep 2026
+
+> ## OVERNIGHT SUMMARY — read this first
+>
+> **Worked autonomously 01 Sep.** Increment 2 (Tier 1) and Increment 3 (fenced adjudicator) both
+> closed. 156 tests green, 8 commits, all pushed. Working tree clean.
+>
+> **The one thing to look at first:** the table under *The fence, measured* below — specifically the
+> `hostile` row. 22 plausible-but-wrong UTRs proposed, **22 blocked, 0 edges created, linkage
+> precision unmoved at 100.00%**. That is the architectural claim of this whole submission, and it
+> is now a measured number rather than an assertion.
+>
+> **Decisions I made without you, all reversible, all in the Decisions Log:**
+> - **D-018** — measure Tier 1 by *decomposition closure* rather than explanation rate, because on
+>   the held-out seed no bank edge exists and explanation rate is 0% for reasons unrelated to the
+>   arithmetic. Conservative: it adds a measurement, removes none.
+> - **D-019** — the claim we defend is *"Tier 1 generalises across worlds, not across contracts"*,
+>   backed by a published ~49/51 schema/contract split. I chose the weaker, defensible claim over
+>   the stronger one the numbers superficially support.
+> - **D-020** — exceptions describe the graph's final state; superseded ones are dropped from the
+>   queue and kept in the audit log. Fixed 20 phantom breaks.
+> - **D-021** — Tier 3 runs *before* Tier 1 and supplies linkage only; edges carry `linked_by`
+>   separately from `tier`.
+> - **D-022** — with no API key, the fence is measured and the model's accuracy is claimed
+>   **nowhere**. The oracle number below is an upper bound, labelled as such.
+> - **D-023** — Tier 3 honours Tier 0's ambiguity refusal (D-014). Found by precision dropping to
+>   99.97%.
+>
+> **Flagged for your sign-off, deliberately not done:** `README.md` still carries Increment 1's
+> numbers and now understates the system considerably (it says explanation rate 0%; it is 83.33% on
+> dev). Updating it changes the project's public framing, which you asked me not to push without
+> review. It is the first thing to approve.
+>
+> **Not done, needs you:** the LLM's real extraction accuracy. There is no `ANTHROPIC_API_KEY` in
+> this environment, so it is unmeasured and unclaimed. With a key, `python -m recon eval` plus the
+> adjudicator wired in would produce the real number in one run.
+
+### The fence, measured (held-out seed, 22 unparseable narrations)
+
+| Adjudicator | Explanation | Coverage | Precision | Calls | **Blocked** | T3 edges | Foots | JEs |
+|---|---|---|---|---|---|---|---|---|
+| **null** (shipped default) | 0/24 | 0/22 | 100.00% | 0 | 0 | 0 | YES | 0 |
+| **hostile** (plausible wrong UTRs) | 0/24 | 0/22 | **100.00%** | 22 | **22** | **0** | YES | 0 |
+| **broken** (every call 503s) | 0/24 | 0/22 | 100.00% | 22 | 0 | 0 | YES | 0 |
+| **oracle** (perfect extractor — *upper bound, not a claim*) | 21/24 | 21/22 | 100.00% | 22 | 0 | 21 | YES | 21 |
+
+### Exit gate
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | Adjudicator asked only where the regex failed | PASS — asked set == `NARRATION_UNPARSEABLE` set, pinned by test |
+| 2 | **Hostile adjudicator 100% blocked** | **PASS — 22/22, zero edges created** |
+| 3 | **Linkage precision unmoved under attack** | **PASS — 100.00%, and the statement still foots** |
+| 4 | A truthful adjudicator IS accepted (not a wall) | PASS — 21 accepted, 1 refused on ambiguity |
+| 5 | Degraded mode: no adjudicator, run completes | PASS — unchanged, exit 0 |
+| 6 | Determinism with an adjudicator wired in | PASS — byte-identical; both seeds byte-identical on the default path |
+| 7 | Ablation extends to T3, still a group-by | PASS — eval: T0 0%, T1 0%, T3 87.50% |
+| 8 | `pytest` green; float scan total; clean clone in gate | PASS — **156 tests** |
+| 9 | No claim about real LLM accuracy | PASS — asserted nowhere; see D-022 |
+
+### What this taught us
+
+**1. The verifier was necessary and not sufficient, and that is the most useful thing here.**
+The gate blocks hallucinations perfectly. It did **not** block an adjudicator that read a
+*duplicated* UTR correctly — because that is not a hallucination, it is right, and the lookup
+succeeds. Tier 3 therefore made exactly the link Tier 0 refuses to make on ambiguity (D-014).
+
+It surfaced as linkage precision dropping to **99.97%** and the statement ceasing to foot — which is
+precisely why both are asserted rather than only the hallucination count. A fence tested solely
+against wrong answers would have shipped this. The lesson generalises: *"the model was correct" and
+"the action was safe" are different questions, and only the second one matters at the gate.*
+
+**2. One tier per edge was not enough once an LLM could create edges.**
+`tier` means "the tier that produced the current status", and Tier 1 upgrades an LLM-linked edge
+immediately after Tier 3 links it — so the adjudicator's entire contribution vanished from the graph
+and from the ablation. Edges now carry `linked_by` as well, and an edge counts at tier N only if
+**both** its linkage and its explanation are within N.
+
+**3. The eval failure is now localised to exactly one component.**
+With linkage supplied by an oracle, the held-out seed goes from 0/24 to **21/24 explained, 21/22
+coverage, statement footing, 21 balanced journal entries** — the same behaviour as dev. So the whole
+held-out gap is narration parsing, and nothing else. That is the sharpest possible case for where an
+LLM belongs, and it was measured rather than argued.
+
+**4. Degraded mode is not a feature we added; it is the path we ship.**
+Every run in this repo to date has run with no adjudicator. The `broken` row above — 22 calls, all
+failing — completes, reports, foots, and keeps precision at 100.00%.
+
+### Time
+
+**9 of 13 days elapsed.** Engine work stops **03 Sep**: two days left. Increments 4 and 5 were merged
+into Increment 2's tail at the Inc 1 gate and are substantially delivered (statement foots, journal
+entries post and balance, typed and prioritised queue, degraded mode, audit log, determinism,
+`blocked_hallucination`).
+
+### Next
+
+**Increment 6 is the remaining work, and it is protected.** Video, README, architecture doc, failure
+log — 3 of the 4 things Razorpay actually receives. The README rewrite is the first task and needs
+sign-off because it changes public framing.
