@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| **Current increment** | 2 — Tier 1 **[CLOSED 01 Sep]** · next: Increment 3, LLM narration only |
+| **Current increment** | 3 — Fenced adjudicator **[OPEN 01 Sep]** · no API key: fence measured, accuracy not claimed |
 | **Deadline** | 05 Sep 2026 — **confirmed with user** (not published on razorpay.com/buildathon) |
 | **Today** | 31 Aug 2026 |
 | **Elapsed / remaining** | 9 of 13 days elapsed (69%) · **4 days remain** · engine work stops 03 Sep · scope cut at the Inc 1 gate |
@@ -351,6 +351,68 @@ they have something to verify.
 | 2 | Can a reserve release be tied to its originating cycle arithmetically? | `notes` carries the answer, and `notes` is banned | Match on amount + hold period against prior cycles; unmatched becomes `RESERVE_RELEASE_UNMATCHED` |
 | 3 | Does anything remain unexplained after Tier 1? | Inc 1 says no, but by construction | Measure. A non-zero residual is the more interesting outcome |
 | 4 | Does the chargeback fee/reversal split survive without `description`? | Both carry `dispute_id`; only the contracted fee amount separates them | Split on the rate-card constant and count misclassifications |
+
+---
+
+## INCREMENT 3 — The fenced adjudicator  **[OPEN 01 Sep 2026]**
+
+**Goal:** Give the LLM exactly one job — extracting a UTR from a narration no deterministic parser
+was written for — and fence it so it cannot corrupt the ledger. Then **measure the fence**, which is
+the part that can be measured tonight.
+
+**There is no API key in this environment.** That is the fact that shapes this increment, and the
+conservative response is to build everything that is testable without one and claim nothing that is
+not. So: the adjudicator, the cache, the verifier gate, the `blocked_hallucination` counter, degraded
+mode and the ablation harness all land and are tested. **The LLM's actual extraction accuracy is not
+measured and is not claimed anywhere.** It needs a key, and that is flagged as a task for review
+rather than quietly estimated.
+
+That is not a hole in the submission. The architectural claim — *the LLM selects and explains, the
+arithmetic engine verifies, and a hallucination cannot survive* — is the claim worth defending, and
+it is provable without a key by pointing a deliberately **hostile** adjudicator at the fence and
+counting what gets through. Zero is the only acceptable answer.
+
+### Where the LLM is allowed to act, and where it is not
+
+Invariant 8: the LLM never computes money. It gets one job, `parse_narration`, and only on bank
+credits where the regex found nothing. Its output is a *candidate string*, immediately re-verified by
+exact lookup against known settlement UTRs. A proposal that does not resolve is REJECTED and counted.
+
+It is never asked to choose between candidate settlements, never to explain a residual, never to
+touch an amount. Tier 1 closed 100% of the gaps it was given (D-018), so there is no arithmetic left
+for an LLM to help with — and inventing a job for it would be the §9 anti-pattern D-016 already ruled
+out.
+
+### Dependency rule, unchanged
+
+The `anthropic` SDK is an **optional extra** (`pip install -e ".[llm]"`), imported lazily inside the
+adjudicator. CLAUDE.md pins the default install to `pydantic` + `pytest` to protect the clean-clone
+gate, and that stands: with no SDK and no key the adjudicator reports unavailable with a reason, and
+the run degrades exactly as it does today.
+
+### Exit gate
+
+Every condition below is measurable with **no API key**.
+
+1. **Tier 3 is asked only where Tier 0 failed.** Adjudicator calls == narrations the regex could not
+   parse. It must never be consulted about a narration already resolved deterministically.
+2. **The fence holds under attack.** A hostile adjudicator returning plausible-but-wrong UTRs gets
+   **100% blocked**; `blocked_hallucination` equals the number of proposals made.
+3. **Linkage precision stays 100.00%** with that hostile adjudicator wired in. This is the real claim:
+   a hallucination cannot become a match.
+4. **A truthful adjudicator is accepted**, proving the gate is a verifier and not a blanket refusal —
+   a fence that rejects everything is not a fence, it is a wall.
+5. **Degraded mode unchanged:** no adjudicator, run completes, reports degraded, exit 0.
+6. **Determinism:** repeated runs byte-identical with an adjudicator wired in; the cache is what
+   guarantees it, since sampling never can.
+7. **Ablation extends to T3**, cumulative, still a group-by.
+8. `pytest` green; float scan still total; clean clone still inside 300 s with the default extras.
+9. **Explicitly NOT claimed:** any figure for the LLM's real-world extraction accuracy. Requires a
+   key; flagged for review.
+
+### Deliberately NOT in Increment 3
+
+Any claim about LLM accuracy · Tier 2 (CUT) · multi-gateway (CUT) · a second merchant (CUT) · UI.
 
 ---
 
