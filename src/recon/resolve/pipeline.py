@@ -13,16 +13,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..audit.log import AuditLog, run_id_for
-from ..domain.graph import EdgeStatus, ReconEdge
+from ..domain.graph import EdgeKind, EdgeStatus, ReconEdge
 from ..domain.identities import RULE_VERSION
 from ..domain.truth import GroundTruth
 from ..ingest.load import Repository, load_all
 from ..ledger import statement as ledger
-from ..llm.client import Adjudicator, LLMStats, NullAdjudicator
+from ..llm.client import Adjudicator, LLMStats, NullAdjudicator, ResponseCache
 from ..money import Paise
 from ..report import exceptions as queue
 from ..report import metrics as report_metrics
-from . import tier0, tier1
+from . import tier0, tier1, tier3
 
 SOURCE_FILES = ("books.jsonl", "settlement_lines.jsonl", "settlements.jsonl", "bank.jsonl")
 
@@ -64,9 +64,27 @@ def run(data_dir: Path, out_dir: Path,
 
     edges, exception_records = tier0.resolve(repo, audit)
 
+    # Built before Tier 3 so the counters it increments are the ones reported.
+    # With no adjudicator configured this stays a degraded run and Tier 3 is a
+    # no-op -- which is why every run so far has already exercised that path.
+    llm = LLMStats(
+        available=adjudicator.available,
+        degraded=not adjudicator.available,
+        degraded_reason=getattr(adjudicator, "reason", "") if not adjudicator.available else "",
+    )
+
     # Tier 1 takes Tier 0's MATCHED bank edges and types what remains against the
     # contracted rate card. It returns new edges rather than mutating: the audit
     # log carries the transition, so the graph never holds two versions of a truth.
+    # Tier 3 BEFORE Tier 1, because they do different jobs in a fixed order: the
+    # adjudicator can only establish a LINKAGE, and the money on any edge it
+    # creates still has to be explained by the arithmetic afterwards. Running it
+    # after Tier 1 would leave LLM-linked credits permanently unexplained, and
+    # letting it run instead of Tier 1 would be invariant 8 violated outright.
+    cache = ResponseCache()
+    edges, exception_records = tier3.resolve(
+        repo, edges, exception_records, adjudicator, cache, llm, audit)
+
     edges, tier1_exceptions = tier1.resolve(repo, edges, audit)
     exception_records.extend(tier1_exceptions)
 
@@ -76,6 +94,14 @@ def run(data_dir: Path, out_dir: Path,
     # most of them, and without this the queue would show an analyst 20 phantom
     # breaks that the system had in fact already explained. Supersession is
     # recorded in the audit log so the intermediate view is still reconstructible.
+    linked_settlements = {e.dst_uid for e in edges if e.kind is EdgeKind.BANK_TO_SETTLEMENT}
+    still_missing = [r for r in exception_records
+                     if r.code == "MISSING_BANK_CREDIT" and r.subject_id in linked_settlements]
+    for record in still_missing:
+        audit.record("exception_superseded", code=record.code,
+                     subject=record.subject_id, by_tier=3)
+    exception_records = [r for r in exception_records if r not in still_missing]
+
     explained_refs = {e.ref for e in edges if e.status is EdgeStatus.EXPLAINED}
     superseded = [r for r in exception_records
                   if r.subject_kind == queue.SUBJECT_EDGE and r.subject_id in explained_refs]
@@ -84,16 +110,6 @@ def run(data_dir: Path, out_dir: Path,
                      subject=record.subject_id, by_tier=1)
     exception_records = [r for r in exception_records if r not in superseded]
 
-    # Still rules-only by design, so every run is already a degraded-mode run.
-    # Proving the degraded path on day one beats proving it on demo day.
-    llm = LLMStats(
-        available=adjudicator.available,
-        calls_attempted=0,
-        calls_declined=getattr(adjudicator, "calls_declined", 0),
-        degraded=not adjudicator.available,
-        degraded_reason=getattr(adjudicator, "reason", "") if not adjudicator.available else "",
-    )
-    audit.record("adjudicator_status", **llm.to_json())
 
     truth = GroundTruth.read(data_dir / "ground_truth.json")
     metrics = report_metrics.compute(edges, exception_records, truth, repo)

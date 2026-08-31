@@ -330,11 +330,19 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
     # table falls out by construction rather than being reconstructed later.
     ablation: dict[str, dict] = {}
     previous_bps = 0
+    # Span every tier actually represented, not just BUILT_TIER: an adjudicator
+    # may be configured at runtime even though the remit ceiling has not moved.
+    highest = max([BUILT_TIER] + [max(e.tier.value, e.established_by.value)
+                                  for e in bank_edges] or [BUILT_TIER])
     for tier in sorted(Tier, key=lambda x: x.value):
-        if tier.value > BUILT_TIER:
+        if tier.value > highest:
             break
+        # An edge counts at tier N only if BOTH its linkage and its explanation
+        # are within N -- an LLM-linked, Tier-1-explained edge is not something
+        # Tier 1 alone could have produced.
         explained_at = len([e for e in bank_edges
-                            if e.status is EdgeStatus.EXPLAINED and e.tier.value <= tier.value])
+                            if e.status is EdgeStatus.EXPLAINED
+                            and max(e.tier.value, e.established_by.value) <= tier.value])
         rate = ratio_bps(explained_at, len(repo.bank))
         ablation[f"T{tier.value}_{tier.name.split('_', 1)[1].lower()}"] = {
             "explained": explained_at,

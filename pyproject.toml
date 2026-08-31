@@ -13,6 +13,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# The vendor SDK is OPTIONAL on purpose. CLAUDE.md pins the default install to
+# pydantic + pytest to protect the clean-clone gate, and the adjudicator imports
+# it lazily -- with the extra absent the run degrades to rules-only, which is the
+# path every run takes today.
+llm = ["anthropic>=0.40"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

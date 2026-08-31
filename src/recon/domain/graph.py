@@ -326,6 +326,17 @@ class ReconEdge:
     evidence: tuple[Evidence, ...] = ()
     decomposition: Decomposition | None = None
     exception: ExceptionType | None = None
+    # Which tier established the LINKAGE, as opposed to the current status.
+    #
+    # These come apart the moment an LLM is in the loop: Tier 3 can propose the
+    # link, and Tier 1 must still explain the money, so the edge ends up with
+    # tier=T1_ARITHMETIC and the adjudicator's contribution vanishes from both the
+    # graph and the ablation. Recording it separately keeps `tier` meaning exactly
+    # what it always meant -- the tier that produced the current status -- while
+    # making "which tier made this edge possible" answerable.
+    #
+    # None means the linkage and the status came from the same tier.
+    linked_by: Tier | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.confidence <= 100:
@@ -341,6 +352,13 @@ class ReconEdge:
             raise ValueError(
                 f"{self.kind.value} is variance-bearing and cannot be EXPLAINED "
                 f"without a decomposition")
+
+    @property
+    def established_by(self) -> Tier:
+        """The tier that made this edge exist. An edge is only explained at tier N
+        if BOTH its linkage and its explanation are within N, so the ablation is a
+        max over the two rather than a read of either."""
+        return self.linked_by or self.tier
 
     @property
     def spec(self) -> EdgeSpec:
@@ -370,4 +388,5 @@ class ReconEdge:
             "evidence": [e.to_json() for e in self.evidence],
             "decomposition": self.decomposition.to_json() if self.decomposition else None,
             "exception": self.exception.code if self.exception else None,
+            "linked_by": self.established_by.name,
         }
