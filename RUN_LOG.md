@@ -151,6 +151,36 @@ Sec 3.3 deduction stack except TDS 194-O.
 | Orders / line items / records | 1,549 / 1,732 / 3,327 | 1,600 / 1,789 / 3,435 |
 | Line types | payment, refund, transfer, adjustment | same |
 
+### At a glance
+
+Five of the fifteen metrics below, for a reviewer deciding whether to read further. **The `Numbers`
+table is the record for this gate**; nothing here is measured independently of it, and if the two ever
+disagree, that table is right and this block is stale.
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate · settlement coverage | 0.00% (0/24) · 0.00% (0/22) | 0.00% (0/24) · 0.00% (0/22) |
+| Intrinsic clean rate — *the realism target* | 89.12% (2,965/3,327) | 89.46% (3,073/3,435) |
+| **False-clear, in remit — must be zero** | **0.00% (0/109)** | **0.00% (0/104)** |
+| Linkage precision | 100.00% (3,388/3,388) | 100.00% (3,488/3,488) |
+| Narration parse rate | 100.00% (24/24) | 8.33% (2/24) |
+
+Three things a skim will otherwise get backwards:
+
+- **0% explanation is the expected result of this increment, not a regression.** Tier 0 reads the fee
+  and tax the report states and knows nothing about a rolling reserve, so `gross − cash − MDR − GST`
+  cannot land on zero once one exists. Increment 0's 100% was a fact about clean data. Both headline
+  denominators are shown together because neither is honest alone (D-005), and here both are zero.
+- **The number that must never regress is false-clear IN REMIT, not the raw 43%.** Out-of-remit
+  breaks — 83 on dev, 80 on eval — are every one of them `MDR_SLAB_MISMATCH`, which needs the
+  contracted rate card and is Tier 1 by definition. Nothing was cleared there; nothing looked (D-009).
+- **The parse rate overstates the parser.** Both eval hits are injected stray credits carrying their
+  own narration. On held-out *settlement* narrations it is **0 of 22**, and with only two held-out
+  families that gap is a direction, not a magnitude.
+
+The residual distribution below is 100% typed **by construction** — see D-015 before drawing the
+obvious conclusion from it.
+
 ### Exit gate
 
 | # | Condition | Result |
