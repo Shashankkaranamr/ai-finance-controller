@@ -42,40 +42,50 @@ estimates. If you feel the urge to plan the whole build, re-read §13.1.
 
 ## Current state
 
-**Increment 0 — CLOSED 25 Aug 2026.** All 7 gate conditions passed. 91 tests green.
-Next: **Increment 1 — faithful generator.**
+**Increment 0 — CLOSED 25 Aug 2026.** All 7 gate conditions passed.
+**Increment 1 — CLOSED 31 Aug 2026.** All 12 gate conditions passed. **124 tests green.**
+Next: **Increment 2 — Tier 1 arithmetic variance decomposition. The pivot.**
+
+**Read `RUN_LOG.md`'s Increment 1 section before planning Increment 2.** The pivot depends on it, and
+D-015 is the entry that decides the shape of the submission.
 
 ### What exists
 
-Tier 0 resolver (exact-key join + identity checking) · world simulator with truth-first generation ·
-ingest with Pydantic validation and quarantine · metrics harness with false-clear · reconciliation
+Tier 0 resolver, complete for its declared remit (exact-key joins incl. `REFUND_TO_PAYMENT`,
+cardinality violations, flag/date reads, per-line GST identity) · faithful world simulator: full
+Sec 3.1 schema, all four line types, the whole Sec 3.3 deduction stack except TDS 194-O · contracted
+MDR slab table (`domain/rates.py`) · dev + **held-out eval seed** with template-level narration split
+· `eval` subcommand (D-007 closed) · ingest with Pydantic validation and quarantine · metrics with
+false-clear **split by tier remit**, intrinsic clean rate and residual distribution · reconciliation
 statement that foots · balanced journal entries · typed exception queue with evidence · append-only
-audit log · LLM seam as a null implementation · determinism contract.
+audit log · LLM seam as a null implementation · determinism contract, verified on both seeds.
 
 ### What deliberately does NOT exist yet
 
-Tier 1 decomposition · Tier 2 · any LLM call · MDR slab table · rolling reserve · chargebacks ·
-refunds/transfers/adjustments · held-out eval seed · anomaly injection beyond `MISSING_BANK_CREDIT` ·
-ablation table · any UI · `eval` subcommand (D-007) · `ARCHITECTURE.md` (Increment 6).
+Tier 1 decomposition · Tier 2 · any LLM call · ablation table · any UI · `ARCHITECTURE.md`
+(Increment 6). **CUT, not pending:** second merchant scenario · FX · TDS 194-O (D-011).
 
-`REFUND_TO_PAYMENT` is declared in `EDGE_SPECS` **on hypothesis** and is unexercised. It is the part
-of the grain model most likely to be wrong.
+`REFUND_TO_PAYMENT` was the part of the grain model most likely to be wrong. Increment 1 exercised it
+against 60+ cross-cycle refunds per seed and **it holds** — the binary edge expresses them without
+strain. That uncertainty is closed.
 
 ---
 
 ## Commands
 
 ```bash
-./.venv/Scripts/python.exe -m recon demo     # generate + reconcile + report
-./.venv/Scripts/python.exe -m recon generate --seed dev --cycles 6
+./.venv/Scripts/python.exe -m recon demo     # generate + reconcile + report (dev seed)
+./.venv/Scripts/python.exe -m recon eval     # the HELD-OUT seed: different world AND narrations
+./.venv/Scripts/python.exe -m recon generate --seed dev --days 88
 ./.venv/Scripts/python.exe -m recon run --seed dev
-./.venv/Scripts/python.exe -m pytest         # 91 tests; use bare pytest, NOT -q (addopts already has it)
+./.venv/Scripts/python.exe -m pytest         # 124 tests; use bare pytest, NOT -q (addopts already has it)
 ```
 
 The venv is at `.venv/`. `make` and `uv` are **not installed** on this machine — `python -m recon`
 is the real entrypoint and the Makefile is only a forwarder for reviewers. Windows, Python 3.13.
 
-Clean clone → working demo measured at **57 s** against a 300 s gate. Protect that: dependencies are
+Clean clone → working demo measured at **27 s** against a 300 s gate, at ~4x Increment 0's data
+(57 s was the Inc 0 figure, on the old OneDrive path — see D-008). Protect that: dependencies are
 `pydantic` + `pytest` and nothing else. No pandas/polars until a profile says otherwise.
 
 ---
@@ -103,6 +113,16 @@ Clean clone → working demo measured at **57 s** against a 300 s gate. Protect 
    by the arithmetic engine before acceptance; rejections increment `blocked_hallucination`.
 9. **`is_break` separates real breaks from explained-but-notable.** Conflating them inflates the
    exception count and understates the agent (§6).
+10. **False clear is split by remit, and the in-remit number must be zero.** `ExceptionType` carries
+    `detectable_at` (lowest tier that can flag it) and `resolvable` (can any tier ever close it).
+    `BUILT_TIER` in `domain/graph.py` says how far the resolver actually goes — **bump it in the same
+    commit that lands a tier, never ahead of one.** `test_tier0_covers_its_declared_remit` fails if a
+    class marked tier 0 is never raised in `tier0.py` (D-009).
+11. **If money moves, a row says so.** Every deduction is a line item, never a silent adjustment to a
+    total. Violating this breaks the rollup identity and the resolver correctly blames the data for
+    our bug (F-006).
+12. **A gate condition verified on one seed is not verified.** Parameterise over `dev` and `eval`
+    (F-009).
 
 ---
 
@@ -122,6 +142,21 @@ identity, ask where each side comes from. (D-003, F-002)
 **100.00% (5/5)** while settlement coverage read **83.33% (5/6)** — a settlement that never reached
 the bank contributes nothing to the bank-credit denominator, so the worst break in the set was
 invisible in the first number. (D-005)
+
+**A 0% explanation rate at Tier 0 is the expected result, not a regression.** Tier 0 reads the fee
+and tax the report states and knows nothing about a rolling reserve, so `gross − cash − MDR − GST`
+cannot land on zero. Increment 0's 100% was a fact about clean data. Do not "fix" this outside
+Increment 2 — it is the measured argument for Tier 1.
+
+**The residual distribution is 100% typed BY CONSTRUCTION. Do not quote it as a discovery.** The
+world is simulated from typed components, so of course every residual types. It means an arithmetic
+Tier 1 can reach all of it; it does *not* mean real residuals behave this way, and it means
+Increment 1 produced **no genuine Tier-2 ambiguity**. The Inc 2 pivot must be decided, not read off
+this number. (D-015)
+
+**Detection and resolution are different questions.** `REFUND_ORPHANED` is detected perfectly at
+Tier 0 and is unresolvable at every tier. Saying "we cannot see it" understates the system and is
+simply false. (F-008)
 
 **Exceptions attach to a unit OR an edge.** An unmatched unit is the *absence* of an edge, and
 absence carries no evidence. This is the most common break shape in real reconciliation. (D-002)
@@ -205,8 +240,22 @@ rather than dressing up a for-loop.
 
 ---
 
-## Open question for Increment 1
+## Open question for Increment 2
 
-Does Tier 0's explanation rate fall to something realistic once the data is genuinely messy? **If it
-stays above ~95%, the data is too clean and must be fixed before Tier 1 is worth building.** Target
-85–92% cleanly resolvable, and include at least one anomaly class the agent is *expected* to fail on.
+**Does Tier 1 close the residual to zero — and if it does, what is the submission?**
+
+Increment 1 measured Tier 0's residual as 100% typed-component-shaped with zero scatter, so an
+arithmetic Tier 1 should reach all of it. That is the good outcome, and it creates the harder
+question, which §13.1 says is the whole reason for planning incrementally:
+
+- **If Tier 1 closes it:** the honest submission is "deterministic arithmetic closes the loop, and
+  the LLM's only defensible place is narration extraction" — for which the measured parse gap
+  (100.00% on dev, **0 of 22** on held-out settlement narrations) is the argument. The ablation then
+  shows the LLM adding nothing to the arithmetic and everything to extraction, which is a *result*,
+  not a disappointment.
+- **Or pull the multi-gateway lever** (cut list rank 8, held for exactly this) to manufacture genuine
+  Tier-2 ambiguity, and build the adjudicator the track's AI-judgment axis rewards.
+
+Both are good submissions. They are different submissions. **Three engine days remain (stop 03 Sep),
+so this choice is also a scheduling decision — make it at the Increment 2 gate, explicitly, and
+record it.**

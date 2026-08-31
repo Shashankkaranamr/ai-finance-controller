@@ -137,3 +137,130 @@ cleanly resolvable), dev + **held-out eval seed**, eval-split narration families
 Open question to answer there: does Tier 0's explanation rate fall to something realistic
 once the data is messy? If it stays above ~95%, the data is too clean and must be fixed
 before Tier 1 is worth building.
+
+---
+
+## Increment 1 — Faithful generator · gate reached 31 Aug 2026
+
+**Two seeds.** `dev` (tuned on) and `eval` (held out: a different world *and* narration templates the
+parser has never seen). 88 days · 22 settlement cycles · all four Sec 3.1 line types · the full
+Sec 3.3 deduction stack except TDS 194-O.
+
+| | dev | eval |
+|---|---|---|
+| Orders / line items / records | 1,549 / 1,732 / 3,327 | 1,600 / 1,789 / 3,435 |
+| Line types | payment, refund, transfer, adjustment | same |
+
+### Exit gate
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | 1,000–2,000 lines, 60–90 days, 15–25 cycles, both seeds | PASS — 1,732 / 1,789 lines, 88 days, 22 cycles |
+| 2 | Full Sec 3.1 field set, all four types, exact ID prefixes | PASS — 26 fields pinned by test |
+| 3 | Whole deduction stack in world *and* ground truth | PASS — 9 component types, both seeds |
+| 4 | **Intrinsic clean rate in 85–92%** | **PASS — 89.12% dev, 89.46% eval** |
+| 5 | One declared expected-to-fail class, and it fails | PASS — `REFUND_ORPHANED`, 9 per seed |
+| 6 | Held-out split real; parse rate reported per split | PASS — 100.00% dev vs 8.33% eval |
+| 7 | Residual distribution published by true component | PASS — dev; see below |
+| 8 | **False clear — AMENDED, see PLAN.md** | **PASS — in-remit 0.00% (0/109 dev, 0/104 eval)** |
+| 9 | Determinism per seed, byte-identical `metrics.json` | PASS — holds across regeneration too |
+| 10 | Statement foots on both seeds; journal entries balance | PASS — foots on both; **0 entries**, see below |
+| 11 | `pytest` green, float scan still total | PASS — **124 tests** |
+| 12 | Clean clone inside 300 s at the new scale | PASS — **27 s** at ~4x the Inc 0 record count |
+
+### Numbers
+
+| Metric | dev | eval (held out) |
+|---|---|---|
+| Explanation rate (bank credits) | 0.00% (0/24) | 0.00% (0/24) |
+| Settlement coverage | 0.00% (0/22) | 0.00% (0/22) |
+| Match rate (line items) | 100.00% (1,732/1,732) | 100.00% (1,789/1,789) |
+| Linkage precision | **100.00%** (3,388/3,388) | **100.00%** (3,488/3,488) |
+| Linkage recall | 99.97% (3,388/3,389) | 99.40% (3,488/3,509) |
+| Exception detection recall | 56.77% (109/192) | 56.52% (104/184) |
+| False-clear, all breaks | 43.23% (83/192) | 43.48% (80/184) |
+| **False-clear, in remit** | **0.00% (0/109)** | **0.00% (0/104)** |
+| False-clear, out of remit | 100.00% (83/83) | 100.00% (80/80) |
+| Exception typing accuracy | 100.00% (109/109) | 99.04% (103/104) |
+| Intrinsic clean rate | 89.12% (2,965/3,327) | 89.46% (3,073/3,435) |
+| Narration parse rate | 100.00% (24/24) | 8.33% (2/24) |
+| Exceptions queued (breaks / informational) | 153 / 148 | 170 / 157 |
+| Throughput | 3,327 records in 91 ms | 3,435 in 91 ms |
+| Statement | foots to zero | foots to zero |
+
+Residual at Tier 0, dev, by the component that truly accounts for it — **Rs 3,96,133.81** total:
+rolling reserve Rs 1,74,079.22 (32.3%) · refund offset Rs 1,36,202.84 (25.3%) · transfer out
+Rs 1,09,580.02 (20.4%) · reserve release −Rs 71,224.02 (13.2%) · chargeback reversal Rs 28,646.46
+(5.3%) · chargeback fee Rs 18,000.00 (3.3%) · instant settlement fee Rs 849.29 (0.2%). **Zero
+scatter.**
+
+### What this taught us
+
+**1. Explanation rate went 100% -> 0%, and that is the increment's main result.**
+Tier 0 reads the fee and tax the report states. It knows nothing about a rolling reserve, so
+`gross − cash − MDR − GST` stops landing on zero the moment one exists. Increment 0's 100% was a fact
+about clean data, not about the resolver. This 0% is the measured argument for Tier 1. The temptation
+to "fix" it inside Increment 1 was the exact scope creep CLAUDE.md's central rule exists to prevent.
+
+**2. The gate condition on false clear was wrong, and the metric was what needed fixing.**
+Condition 8 demanded 0.00% false clear. `MDR_SLAB_MISMATCH` needs the contracted rate card to detect
+— Tier 1 by definition — so the condition was unmeetable without building Tier 1 here. Splitting the
+metric by remit resolved it honestly: **in-remit 0.00% on both seeds**, out-of-remit 83 and 80, every
+one of them `MDR_SLAB_MISMATCH`. The alternative — quietly relaxing the condition at the gate — is
+how a project stops measuring the thing that matters. (F-005, D-009)
+
+**3. The residual is 100% mechanical, BY CONSTRUCTION, and that is a caveat as much as a result.**
+Every paise falls into a typed component. But the world is simulated *from* those components, so of
+course they type. §13.1 poses the Inc 2 pivot as "do residuals scatter into ambiguity?" — and the
+honest answer is that **Increment 1 produced no genuine Tier-2 ambiguity**, not that reconciliation
+has none. This is the single most important thing to carry into the Inc 2 gate: the pivot must be
+*decided*, not read off a number our own generator predetermined. (D-015)
+
+**4. `REFUND_TO_PAYMENT` survived, and the blind spot got sharper.**
+The grain declared on hypothesis in Inc 0 and named in CLAUDE.md as most likely wrong now carries 60+
+cross-cycle refunds per seed without strain. Separately: the first cut of the tier annotation called
+`REFUND_ORPHANED` undetectable. It is detected perfectly — the `payment_id` points at nothing — and it
+is *unresolvable*. Detection and resolution are different questions, and conflating them understated
+the system in the README's own honesty section. (F-008)
+
+**5. Two generator bugs were caught by the resolver being right.**
+The instant-settlement fee moved money with no line item behind it, breaking the rollup on every
+`setlod_*` cycle; Tier 0 reported `ROLLUP_MISMATCH` correctly and match rate read 73.42%. And the GST
+identity checker *crashed* on malformed data it exists to catch, which would have left "we verify the
+GST breakout" true in the README and false in the code. Standing rule from the first: **if money
+moves, a row says so.** (F-006, F-007)
+
+**6. The ledger posts nothing, and that is correct.**
+Auto-posting is gated on EXPLAINED, so zero settlements explained means zero journal entries. An
+accounting system that posts a half-understood entry is worse than one that posts none and raises an
+exception. The test asserting this says in its docstring that it must change to a non-zero count when
+Tier 1 lands — never to a relaxed assertion.
+
+**7. A rate is not a guarantee on a small population.**
+Instant settlements at 9% over 22 cycles drew two on dev and **zero** on eval, leaving the deduction
+stack complete on one seed and not the other. Caught only because the gate test was parameterised
+over both seeds. Now a count, like every other whole-run event. (F-009)
+
+**8. Throughput is still a non-issue.** 3,300+ records in 91 ms in pure Python, ~4x Inc 0's data at
+the same wall clock. Clean clone 27 s against a 300 s gate. The decision to hold dependencies at
+pydantic + pytest keeps paying.
+
+### Time
+
+**8 of 13 days elapsed (62%).** 5 days remain to 05 Sep; engine work stops **03 Sep**, so **three
+engine days** remain for everything after this gate. Increments 0–2 were budgeted at half the
+calendar and have now exceeded it.
+
+**Scope was therefore cut at this gate, per ritual step 4** — not deferred again. Second merchant
+scenario and FX: CUT. Increments 4 and 5: merged into Increment 2's tail, because most of both
+already exists. Tier 2: conditional and now doubtful. See the re-ranked cut list in PLAN.md, dated
+31 Aug.
+
+### Next
+
+**Increment 2 — Tier 1 arithmetic variance decomposition. The pivot.** Plan it against these
+results, not against expectations, and answer D-015 explicitly at its gate: if Tier 1 closes the
+residual to zero, is the submission "deterministic arithmetic closes it, and the LLM's only
+defensible place is narration extraction" — for which the measured 100% -> 0-of-22 parse gap is the
+argument — or is the multi-gateway lever pulled to manufacture genuine ambiguity? Both are good
+submissions. They are different submissions.

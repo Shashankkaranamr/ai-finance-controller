@@ -1,6 +1,6 @@
 # AI Finance Controller — three-way settlement reconciliation
 
-**Razorpay Buildathon, Track 04.** Status: **Increment 0 (walking skeleton) complete.**
+**Razorpay Buildathon, Track 04.** Status: **Increment 1 (faithful generator) complete.**
 This is an incremental build — see [PLAN.md](PLAN.md) for what is deliberately not built yet.
 
 ---
@@ -34,12 +34,14 @@ append-only audit trail.
 ```bash
 python -m venv .venv && .venv/Scripts/activate     # Windows;  source .venv/bin/activate elsewhere
 pip install -e ".[dev]"
-python -m recon demo                                # generate + reconcile + report
-pytest                                              # 91 tests
+python -m recon demo                                # generate + reconcile + report (dev seed)
+python -m recon eval                                # the HELD-OUT seed (see below)
+pytest                                              # 124 tests
 ```
 
 `make demo` forwards to the same entrypoint for reviewers who have GNU make. No network access and no
-API key are required — Increment 0 is rules-only by design.
+API key are required — the build is rules-only so far, by design. Clean clone to working demo,
+measured on Windows with no `uv` and no `make`: **27 s**.
 
 ---
 
@@ -108,11 +110,25 @@ linkage precision          = correct edges  / edges we accepted      <- lead wit
 linkage recall             = correct edges  / true edges
 exception detection recall = injected breaks caught / injected breaks
 false-clear rate           = injected breaks NOT flagged / injected breaks
+  ...in remit              = missed breaks detectable at the built tier / those breaks
+  ...out of remit          = missed breaks needing a higher tier      / those breaks
 exception typing accuracy  = correctly coded / breaks caught
+intrinsic clean rate       = units with no injected anomaly / all units   <- a property of the DATA
+narration parse rate       = credits whose UTR the regex extracted / all credits
 ```
 
 **False-clear is tracked separately and prominently.** A missed match costs an analyst ten minutes; a
 false clear means money silently leaves the reconciliation and nobody looks again.
+
+**And it is split by remit, which matters more than the headline number.** "We did not flag it"
+bundles two different failures: a break the built resolver was accountable for and silently passed,
+and a break whose detection needs a tier that does not exist yet. Only the first is a false clear in
+any meaningful sense — nothing was cleared in the second case, nothing looked. Every exception class
+declares the lowest tier that can detect it, `BUILT_TIER` declares how far this build actually goes,
+and a test fails if a class claimed detectable at tier 0 is never raised in `tier0.py`. Without that
+test the split would just be a way to relabel real misses.
+
+**The in-remit number is the one that must never regress. It is 0.00% on both seeds.**
 
 Ground truth is emitted by the world simulator *before* the source views are derived from it
 (`src/recon/domain/truth.py`). Labelling views after the fact would encode the matcher's own
@@ -120,25 +136,83 @@ assumptions, and the evaluation would then measure agreement with ourselves.
 
 ---
 
-## Measured — Increment 0, dev seed
+## Measured — Increment 1, both seeds
 
-437 records · 213 orders · 6 settlement cycles · one injected anomaly.
+88 days · 22 settlement cycles · ~1,750 line items · all four Sec 3.1 types · the full deduction
+stack. `dev` is the seed we tune on; `eval` is held out — a different world **and** narration
+templates the parser has never seen.
 
-| | |
-|---|---|
-| Explanation rate (bank credits) | **100.00%** (5/5) |
-| Settlement coverage | **83.33%** (5/6) |
-| Money-weighted coverage | **85.61%** (Rs 4,43,546.72 of Rs 5,18,101.78) |
-| Linkage precision / recall | 100.00% (431/431) / 100.00% |
-| Exception detection recall | 100.00% (1/1) |
-| **False-clear rate** | **0.00%** (0/1) |
-| Reconciliation statement | **foots to zero** |
-| Journal entries | 5, all balanced |
-| Throughput | 437 records in 105 ms (~4,100 rec/s) |
+| | dev | eval (held out) |
+|---|---|---|
+| Line items / records | 1,732 / 3,327 | 1,789 / 3,435 |
+| **Intrinsic clean rate** (from ground truth) | **89.12%** (2,965/3,327) | **89.46%** (3,073/3,435) |
+| Linkage precision | **100.00%** (3,388/3,388) | **100.00%** (3,488/3,488) |
+| Linkage recall | 99.97% (3,388/3,389) | 99.40% (3,488/3,509) |
+| Exception detection recall | 56.77% (109/192) | 56.52% (104/184) |
+| **False-clear, in remit** | **0.00%** (0/109) | **0.00%** (0/104) |
+| False-clear, out of remit | 100.00% (83/83) | 100.00% (80/80) |
+| Exception typing accuracy | 100.00% (109/109) | 99.04% (103/104) |
+| Narration parse rate | **100.00%** (24/24) | **8.33%** (2/24) |
+| Explanation rate (bank credits) | 0.00% (0/24) | 0.00% (0/24) |
+| Reconciliation statement | **foots to zero** | **foots to zero** |
+| Throughput | 3,327 records in 91 ms | 3,435 in 91 ms |
 
-These numbers are from clean data with a single injected anomaly. They establish that the harness
-works; they are **not** a claim about accuracy on realistic data. That claim needs Increment 1's
-anomaly injection and a held-out seed, and it will be reported there.
+**Explanation rate is 0%, and that is the finding, not a regression.** Tier 0 reads the fee and tax
+the report states. It knows nothing about a rolling reserve, a refund offset or a chargeback
+reversal, so `gross − cash − MDR − GST` stops landing on zero the moment those exist. Increment 0's
+100% was a fact about clean data. This 0% is the measured argument for building Tier 1, and it is
+reported rather than engineered away.
+
+**The intrinsic clean rate is the number that answers "is the synthetic data too clean?"** — 89%, from
+ground truth, with no resolver involved. Substituting the resolver's own score there would be
+answering a different question.
+
+### Where the unexplained money actually is
+
+Tier 0 leaves **Rs 3,96,133.81** unexplained on the dev seed. Bucketed by the component that truly
+accounts for it:
+
+| Component | Amount | Share of movement |
+|---|---|---|
+| Rolling reserve | Rs 1,74,079.22 | 32.3% |
+| Refund offset | Rs 1,36,202.84 | 25.3% |
+| Transfer out | Rs 1,09,580.02 | 20.4% |
+| Reserve release | −Rs 71,224.02 | 13.2% |
+| Chargeback reversal | Rs 28,646.46 | 5.3% |
+| Chargeback fee | Rs 18,000.00 | 3.3% |
+| Instant settlement fee | Rs 849.29 | 0.2% |
+
+**Zero scatter — and we are explicit that this is by construction.** The world is simulated *from*
+typed components, so of course every residual types. This says an arithmetic Tier 1 can reach all of
+it; it does **not** establish that real residuals behave this way, and presenting it as an empirical
+discovery would be circular. What it does establish concretely is that Increment 1 produced no
+genuine Tier-2 ambiguity, which is a decision Increment 2 has to make deliberately rather than
+inherit. (PLAN.md, D-015.)
+
+### The held-out seed, and what it costs us
+
+The deterministic narration parser was written against `dev` templates only, and the split is held
+out at the **template** level, not just the seed level — a held-out seed rendered from the same
+templates would only prove the RNG differs.
+
+Parse rate: **100.00% on dev, 8.33% on eval.** The two eval hits are injected stray credits carrying
+their own narration, so on held-out *settlement* narrations the parser scores **0 of 22**.
+
+The honest reading is "this regex handles 0 of 2 unseen shapes", **not** "an LLM adds 100 points".
+Both held-out families defeat it structurally — one truncates the UTR, the other removes the
+delimiters — and with only two families that number is a direction, not a magnitude. The Increment 3
+ablation will say so.
+
+### What this system cannot do, and never will
+
+`REFUND_ORPHANED` — a refund whose original payment was captured before the extract window opens.
+
+It is **always detected**: the `payment_id` points at nothing and we say so, with evidence. It is
+**never resolvable**, by any tier, an LLM included, because the payment is not in the data. There is
+nothing to link it to. Nine per seed, and the exception queue names them.
+
+This is the one class flagged unresolvable, and a test pins that list at exactly one — a growing
+collection of "we can never fix this" is how a blind spot turns into an excuse.
 
 ---
 
@@ -168,7 +242,7 @@ the same templates that generate the eval data wins trivially and the ablation w
 about our generator rather than about reality. Held out at the *template* level, not just the seed
 level (`src/recon/generate/narration.py`).
 
-**Every Increment 0 run is already a degraded-mode run.** No adjudicator is configured, so the
+**Every run so far is already a degraded-mode run.** No adjudicator is configured, so the
 rules-only path that failure recovery depends on is exercised from day one rather than first proven on
 demo day.
 
