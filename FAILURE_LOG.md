@@ -199,4 +199,37 @@ Increment 1 gate test is parameterised over both seeds.
 
 ---
 
+### F-010 · 01 Sep 2026 · The rolling reserve was withheld before the fee that determines it
+
+**What broke.** Starting Tier 1, the first thing it must do is identify which adjustment line is the
+rolling reserve — and it may not do so by reading `description`, which is prose we wrote (D-017). The
+only honest discriminator is arithmetic: is this debit equal to `round_half_up(settled credits x
+500bps)`? Measured against the dev seed, it matched **0 of 22** reserve lines, off by 16 to 329 paise.
+
+**Cause.** `build_world` called `_build_reserve` *before* `_inject_slab_and_gst_anomalies`. The
+reserve was therefore computed on pre-anomaly credits, and the fee injection then changed those
+credits underneath it. A reserve cannot precede the fee that determines it: in reality the gateway
+charges its fee — correctly or not — and only then withholds a percentage of what it actually
+credited.
+
+**Why it mattered.** This is the failure mode that would have quietly forced the anti-pattern. With
+exact arithmetic identification impossible, the tempting fixes are all bad: read `description` (fuzzy
+string matching, §9's number one, and circular since we wrote the string), or accept a tolerance
+(which turns an arithmetic proof into a score). The bug was in the generator, and the modelling was
+simply wrong — but it presents as "Tier 1 needs to be more forgiving", which is exactly how a clean
+design erodes.
+
+**Recovery.** Moved the fee injection ahead of the reserve, which is both correct modelling and makes
+the reserve exactly recoverable: **22 of 22** after the fix. No tolerance anywhere.
+
+**Blast radius, measured rather than assumed.** Every Increment 1 accuracy and realism metric is
+**unchanged** on both seeds — intrinsic clean rate, precision, recall, false-clear in remit, parse
+rate, typing accuracy — because the fix moves reserve *amounts* and touches no unit count and no
+anomaly assignment. The RNG streams are named per concern, so reordering two calls does not reshuffle
+any draw. Only money figures moved: the dev residual went from Rs 3,96,133.81 to Rs 3,96,091.57, a
+delta of **Rs 42.24**, confined to reserve, reserve release and instant fee. Noted in RUN_LOG against
+the Increment 1 entry so a reviewer reproducing it is not surprised.
+
+---
+
 <!-- New entries below. Keep the date, what broke, why it mattered, and the recovery. -->

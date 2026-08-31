@@ -293,8 +293,12 @@ def build_world(config: GenConfig) -> World:
     _build_transfers(world)
     _build_refunds(world)
     _build_disputes(world)
-    _build_reserve(world)
+    # Fee anomalies BEFORE the reserve. The gateway charges its fee -- correctly or
+    # not -- and only then withholds a percentage of what it actually credited. The
+    # reverse order reserves against a credit that does not exist yet, and makes the
+    # reserve arithmetically unrecoverable from the report (F-010).
     _inject_slab_and_gst_anomalies(world)
+    _build_reserve(world)
     _close_settlements(world)
     _inject_bank_anomalies(world)
     return world

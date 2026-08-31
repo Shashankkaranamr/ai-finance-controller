@@ -224,6 +224,17 @@ Rs 1,09,580.02 (20.4%) · reserve release −Rs 71,224.02 (13.2%) · chargeback 
 (5.3%) · chargeback fee Rs 18,000.00 (3.3%) · instant settlement fee Rs 849.29 (0.2%). **Zero
 scatter.**
 
+
+> **Addendum, 01 Sep 2026 — re-measured after F-010.** Building Tier 1 exposed a generator bug: the
+> rolling reserve was withheld before the fee injection that changes the credits it is a percentage
+> of, so it was not exactly recoverable from the report (0 of 22 dev reserve lines; 22 of 22 after
+> the fix). Every accuracy and realism figure in the tables above is **unchanged on both seeds** —
+> the fix moves reserve amounts and touches no unit count or anomaly assignment. Only money figures
+> moved: the dev residual total below is Rs 3,96,091.57 on current code rather than Rs 3,96,133.81,
+> a delta of **Rs 42.24** confined to rolling reserve (Rs 1,74,014.75), reserve release
+> (−Rs 71,201.81) and instant settlement fee (Rs 849.31). The figures as first measured are left
+> above; this note is the reconciliation for anyone reproducing from HEAD.
+
 ### What this taught us
 
 **1. Explanation rate went 100% -> 0%, and that is the increment's main result.**
