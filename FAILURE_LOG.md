@@ -89,4 +89,114 @@ negative) in the test.
 
 ---
 
+### F-005 · 31 Aug 2026 · Increment 1's own gate condition was unmeetable by construction
+
+**What broke.** Gate condition 8, written at the start of the increment, said the false-clear rate
+must "still be 0.00% on both seeds. Non-negotiable." It was written by analogy to Increment 0, where
+the data carried one anomaly and Tier 0 caught it. Once the generator produced the real deduction
+stack, the condition became impossible to satisfy without either building Tier 1 inside Increment 1
+or refusing to generate anomalies Tier 0 cannot see. Both are wrong.
+
+**Why it mattered.** This is the trap the whole increment was designed to avoid, and it was sitting
+in the increment's own plan. `MDR_SLAB_MISMATCH` needs the contracted rate card to detect — that is
+the definition of Tier 1 work. Holding Tier 0 to a 0% false-clear rate against it would have forced
+exactly the scope creep CLAUDE.md's central rule forbids. The alternative failure is worse: quietly
+relaxing the condition at the gate, which is how a project stops measuring the thing that matters.
+
+**Recovery.** The metric was wrong, not the data. "We did not flag it" was bundling two different
+failures: a break the built resolver was accountable for and silently passed, and a break whose
+detection needs a tier that does not exist yet. Added `detectable_at` to `ExceptionType` and split
+the metric into `false_clear_in_remit` (must be zero, and is: 0/109 dev, 0/104 eval) and
+`false_clear_out_of_remit` (83 and 80, every one of them `MDR_SLAB_MISMATCH`). Gate condition 8 was
+amended in place with a dated note rather than rewritten, since PLAN.md is append-only.
+
+**Standing consequence.** `BUILT_TIER` is now a single declared constant, and
+`test_tier0_covers_its_declared_remit` fails if a class marked detectable at tier 0 is never raised
+in `tier0.py`. Without that test the split would be self-serving — a way to relabel real misses as
+"not attempted".
+
+---
+
+### F-006 · 31 Aug 2026 · The instant-settlement fee moved money with no line item behind it
+
+**What broke.** The on-demand settlement fee was modelled by subtracting it from
+`settlement.amount` directly. That silently broke the Sec 3.2 rollup identity on every `setlod_*`
+cycle: the report's own line items no longer summed to the report's own total. Match rate read
+**73.42%**.
+
+**How it was caught.** Tier 0 reported `ROLLUP_MISMATCH` on exactly those settlements — correctly.
+The resolver was right and the generator was wrong, which is the only comfortable way round.
+
+**Why it mattered.** Had it gone unnoticed, the Increment 1 gate would have recorded a 26% rollup
+failure rate as a property of realistic data. It is not a property of anything except our own bug,
+and the residual distribution — the number Increment 2 pivots on — would have been contaminated.
+
+**Recovery.** Emitted the fee as a real `adjustment` line with `debit = fee`, so it is a row like
+every other deduction. Standing rule now in the `_close_settlements` docstring: **if money moves, a
+row says so.** `test_the_rollup_identity_holds_over_every_settlement` covers both seeds.
+
+---
+
+### F-007 · 31 Aug 2026 · The GST checker crashed on exactly the data it exists to catch
+
+**What broke.** `python -m recon run` died with
+`ValueError: apply_rate_bps expects a non-negative amount, got -2`. The GST anomaly injector had
+nudged `tax` above `fee` on a zero-MDR UPI line, making the MDR base negative, and
+`gst_on_mdr_holds` propagated that into `apply_rate_bps`.
+
+**Why it mattered.** Two separate defects wearing one traceback. The injector was producing an
+impossible shape — `fee` is inclusive of `tax`, so `tax > fee` cannot happen — but far worse, the
+identity checker **crashed on malformed input instead of reporting it**. A checker that dies on the
+data it is meant to flag is one that gets wrapped in a try/except and ignored, and then the claim
+"we verify the GST breakout" is false while still being in the README.
+
+**Recovery.** Both ends. `gst_on_mdr_holds` is now total: a negative MDR base returns `False`,
+because it is the strongest possible form of that mismatch, not an error. The injector keeps the
+skew inside `0 < tax <= fee` and skips lines with no GST breakout to skew.
+
+**Standing consequence.** Identity functions are checkers, so they must be defined over every input
+a source file can contain, including nonsense. Robustness is not a nice-to-have in a function whose
+entire job is to survive contact with bad data.
+
+---
+
+### F-008 · 31 Aug 2026 · "Cannot detect" and "cannot resolve" were the same field
+
+**What broke.** The first cut of the tier annotation used one field with `None` meaning
+"structurally unresolvable", and marked `REFUND_ORPHANED` that way. Then the run reported it as
+**caught, 9 out of 9** — Tier 0 detects an orphan refund trivially, because the `payment_id` points
+at nothing.
+
+**Why it mattered.** The declared blind spot was described as something we cannot see. We can see it
+perfectly; what we can never do is *link* it, because the original capture is outside the extract.
+Getting this backwards would have made the README's honesty about a blind spot factually wrong, in
+the direction of understating the system — and a panel that noticed would reasonably ask what else
+was described loosely.
+
+**Recovery.** Split into two fields: `detectable_at` (the tier that can flag it) and `resolvable`
+(whether any tier could ever close it). `REFUND_ORPHANED` is `(0, False)` — always found, never
+fixable. `test_exactly_one_exception_class_is_unresolvable` pins the list at one, so a growing
+collection of "we can never fix this" cannot quietly become an excuse.
+
+---
+
+### F-009 · 31 Aug 2026 · Near miss: a gate condition that held on dev and not on eval
+
+**What broke.** Instant settlements were selected per cycle at a 9% rate. Over 22 cycles the dev
+seed drew two and the **eval seed drew zero**, so `INSTANT_SETTLEMENT_FEE` was absent from the
+deduction stack on one seed and present on the other.
+
+**How it was caught.** Only because the gate test was parameterised over both seeds from the start.
+Run on dev alone it passes, and the incompleteness ships.
+
+**Why it is logged.** A rate applied to a small population is not a guarantee, and a gate condition
+verified on one seed is not verified. The failure mode here is silent and seed-dependent — the worst
+kind, because it comes back on a different seed weeks later looking like a new bug.
+
+**Recovery.** Instant settlements became a **count** chosen by `rng.sample`, matching how the other
+whole-run events (missing bank credit, duplicate UTR, orphan refunds) were already modelled. Every
+Increment 1 gate test is parameterised over both seeds.
+
+---
+
 <!-- New entries below. Keep the date, what broke, why it mattered, and the recovery. -->

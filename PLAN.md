@@ -12,10 +12,10 @@
 
 | | |
 |---|---|
-| **Current increment** | 1 — Faithful generator **[OPEN 31 Aug]** · Inc 0 closed 25 Aug |
+| **Current increment** | 1 — Faithful generator **[CLOSED 31 Aug]** · next: Increment 2, Tier 1 |
 | **Deadline** | 05 Sep 2026 — **confirmed with user** (not published on razorpay.com/buildathon) |
 | **Today** | 31 Aug 2026 |
-| **Elapsed / remaining** | 8 of 13 days elapsed · **5 days remain** · engine work stops 03 Sep |
+| **Elapsed / remaining** | 8 of 13 days elapsed (62%) · **5 days remain** · engine work stops 03 Sep · **scope cut at this gate** |
 | **Hard stop on engine work** | 03 Sep — Increment 6 needs 2 protected days (3 of the 4 deliverables) |
 | **Public repo** | github.com/Shashankkaranamr/ai-finance-controller — live |
 
@@ -112,7 +112,7 @@ against a 5-minute gate.
 
 ---
 
-## INCREMENT 1 — Faithful generator
+## INCREMENT 1 — Faithful generator  **[CLOSED 31 Aug 2026]**
 
 **Goal:** Replace Increment 0's clean, payments-only world with data a controller would recognise —
 the full §3.1 schema, the whole Indian deduction stack, refunds and disputes crossing cycles, and
@@ -195,6 +195,13 @@ its refutation.
 7. **Residual distribution published:** Tier 0's unexplained money bucketed by *true* component type
    from ground truth. This is the Increment 2 input and the reason the gate exists.
 8. **False-clear rate still 0.00%** on both seeds. Non-negotiable — it is on the never-cut list.
+   > **AMENDED 31 Aug 2026, during the increment.** As written this condition was unmeetable by
+   > construction, and the original text is left above so the error is visible. `MDR_SLAB_MISMATCH`
+   > requires the contracted rate card to detect — that is the definition of Tier 1 — so holding
+   > Tier 0 to a 0% false-clear rate against it would have forced Increment 2's work into
+   > Increment 1. The condition now reads: **false clear WITHIN THE BUILT TIER'S REMIT must be
+   > 0.00% on both seeds**, with out-of-remit breaks reported separately and every one of them
+   > naming a class declared unreachable at this tier *before* the run. See F-005 and D-009.
 9. **Determinism per seed:** two runs, byte-identical `metrics.json`, on `dev` and on `eval`.
 10. **Statement still foots to zero on both seeds**; journal entries still balance. The stack is new
     money moving through the entity model, and this is what proves the model absorbed it.
@@ -226,6 +233,26 @@ scenario · any UI · ablation table · `ARCHITECTURE.md`.
 | 2 | Can the statement still foot with a rolling reserve? | Reserve is a receivable, not cash — a naive statement double-counts or drops it | Assert footing on both seeds; a failure here is the most valuable finding available |
 | 3 | Is 85–92% reachable by construction? | Injection rates compose in ways that are hard to predict — anomalies overlap on the same unit | Measure intrinsic clean rate from ground truth and tune rates against it, not against expectations |
 | 4 | How large is the dev/eval narration gap? | We wrote both sides; the gap could be trivial | Report `parse_utr` hit rate per split as a first-class number |
+
+### Answers, 31 Aug 2026
+
+1. **`REFUND_TO_PAYMENT` holds.** Exercised for the first time against 60+ cross-cycle refunds per
+   seed; the binary edge expresses them without strain, and "the refund settles in a later cycle
+   than its payment" is carried as evidence on the edge rather than needing a new grain. The grain
+   model's most suspect declaration survived contact. **Uncertainty closed.**
+2. **The statement still foots with a rolling reserve**, on both seeds, first try. The reserve is
+   two adjustment lines — a debit when withheld and a credit when released — so it moves through the
+   entity model as line items rather than as a special case. No rework needed.
+3. **85–92% was reachable, but only after measuring.** The first tuning landed at 91.97% (dev),
+   sitting on the top edge of the band. Rates were raised and re-measured to 89.12% / 89.46%. This
+   is exactly why the target is checked against ground truth and not against the resolver.
+4. **The narration gap is enormous, and that is a caveat as much as a result.** 100.00% (24/24) on
+   dev, 8.33% (2/24) on eval — and the two eval hits are injected stray credits carrying their own
+   narration, so the true figure on held-out settlement narrations is **0 of 22**. Both held-out
+   families defeat the regex structurally (one truncates the UTR, one removes the delimiters). The
+   honest reading is "this parser handles 0 of 2 unseen shapes", NOT "an LLM adds 100 points". With
+   only two held-out families the number is a direction, not a magnitude, and the Increment 3
+   ablation must say so.
 
 ---
 
@@ -304,6 +331,26 @@ Re-ranked *in place* at every gate, with a dated note. Never rewritten.
 | 5 | TDS 194-O | Out by persona choice | Defend the decision, not the mechanics |
 | 6 | Inc 0's minimal journal entry | Cuttable within Inc 0 | Keep the footing assertion regardless |
 | 7 | Second / third merchant scenario | Deferred | Inc 1 decides |
+| — | **Never cut** | — | Held-out seed · false-clear metric · degraded mode · Increment 6 |
+
+**Re-ranked 31 Aug 2026 at the Increment 1 gate. Scope is now cut, not deferred.**
+
+The ritual's step 4 forces this: **8 of 13 days are gone (62%)** and Increments 0–2 were budgeted at
+half the calendar. Engine work stops 03 Sep, which leaves **three engine days** for everything after
+this gate. Cutting at the gate, on measured evidence, is the whole point of the ritual — cutting at
+the end is panic.
+
+| Rank | Item | Status | Note (31 Aug) |
+|---|---|---|---|
+| 1 | Forward cash forecast | **CUT** | Unchanged since 25 Aug |
+| 2 | Second / third merchant scenario | **CUT — decided** | Was "Inc 1 decides". One merchant with a mixed instrument profile carries the difficulty; a second doubles generator surface for zero new break shapes (D-011) |
+| 3 | FX / international settlement | **CUT — decided** | A second currency threaded through the money type buys one exception code (D-011) |
+| 4 | Tier 2 subset-sum | **CONDITIONAL — now doubtful** | Inc 1 measured the residual as 100% typed-component-shaped. Nothing yet needs a search. Decide at the Inc 2 gate on the post-Tier-1 residual, not before (D-015) |
+| 5 | Increment 4 and 5 as separate increments | **MERGED into Inc 2's tail** | Most of both already exists: statement foots, journal entries balance, exception queue is typed and prioritised, degraded mode runs on every run, audit log and determinism are in place. What remains is the verifier gate and `blocked_hallucination`, which belong with the LLM |
+| 6 | Live Razorpay test-mode adapter | Interface only | `SettlementSource` exists; impl only if Inc 6 has slack |
+| 7 | Streamlit UI beyond one screen | Deferred | The video needs one screen |
+| 8 | Multi-gateway collision class | **Held as the lever, now the ONLY candidate** | If Inc 2 confirms Tier 1 closes the residual, this is the only cheap way to manufacture genuine Tier-2 ambiguity — and the honest alternative is to say the data does not contain any (D-015) |
+| 9 | TDS 194-O | Out by persona | Defend the decision, not the mechanics |
 | — | **Never cut** | — | Held-out seed · false-clear metric · degraded mode · Increment 6 |
 
 ---
@@ -419,3 +466,96 @@ to OneDrive — that explanation is now closed and the cause would have to be fo
 removes sync latency from the clean-clone number, re-measured in `RUN_LOG.md` against a fresh venv.
 Reopens only if the repo is moved back under a synced path, which nothing requires.
 **Supersedes:** — (retires the OneDrive risk in Open Uncertainty #5; does not amend it)
+
+### D-009 · Increment 1 · 2026-08-31 · False clear is split by the built tier's remit
+**Decision:** `ExceptionType` gains `detectable_at` (lowest tier that can flag the class) and
+`resolvable` (can any tier ever close it). `BUILT_TIER` is one declared constant. The metric splits
+into `false_clear_in_remit` — which must be zero — and `false_clear_out_of_remit`.
+**Why:** Measured at this gate: 83 of 192 dev breaks went unflagged, and every single one is
+`MDR_SLAB_MISMATCH`, which needs the rate card and is therefore Tier 1 work. A single false-clear
+number would have read 43.23% and forced one of two bad moves: build Tier 1 inside Increment 1, or
+stop generating anomalies Tier 0 cannot see. Neither is acceptable, and quietly relaxing the gate
+condition is worse than both. See F-005.
+**What it rules out:** Reporting one undifferentiated false-clear number. Also rules out
+`detectable_at` being an aspiration: `test_tier0_covers_its_declared_remit` fails if a class marked
+tier 0 is never raised in `tier0.py`, so the split cannot become a way to relabel real misses.
+**Supersedes:** — (amends Increment 1 gate condition 8, in place and dated)
+
+### D-010 · Increment 1 · 2026-08-31 · Increment 1 completes Tier 0's remit; it does not add a tier
+**Decision:** Increment 1 built no Tier 1, Tier 2 or LLM. It did extend `tier0.py` to cover the
+classes that are definitionally Tier 0 on data that finally contains them — the `REFUND_TO_PAYMENT`
+exact-key join, duplicate detection on a 1:1 grain, flag and date reads, and the per-line GST
+identity.
+**Why:** "No new resolver capability" means no new tier, not a frozen Tier 0. Increment 0 raised one
+exception class because the generator produced one shape. Leaving an exact-key join unimplemented
+would have made the gate numbers measure absent plumbing rather than the Tier 0/Tier 1 boundary, and
+uncertainty #1 — does `REFUND_TO_PAYMENT` survive cross-cycle refunds? — cannot be answered without
+running the join.
+**What it rules out:** Reading "no new capability" as licence to leave Tier 0 half-built and then
+attribute the resulting misses to a missing Tier 1.
+**Supersedes:** —
+
+### D-011 · Increment 1 · 2026-08-31 · One merchant, one currency. Second scenario and FX are CUT
+**Decision:** A single merchant with a mixed instrument profile (46% UPI, ~40% card across five
+network/type slabs, netbanking, wallet). Cut-list rank 7, "second/third merchant scenario — Inc 1
+decides", is resolved as **cut**. FX is cut with it.
+**Why:** A second merchant doubles the generator surface and produces no new *break shape* — the
+card-heavy difficulty the brief wants (disputes, reserve) fits inside one merchant's method mix, and
+it does. FX needs a second currency threaded through `Paise` and every identity, to buy one
+exception code. With 62% of the calendar gone, neither earns its place.
+**What it rules out:** `FX_VARIANCE` and `MULTI_GATEWAY_COLLISION` as *generated* classes, and
+therefore as declared members of the taxonomy. Multi-gateway is explicitly retained as the Inc 2
+ambiguity lever (D-015), which is the one thing that would reopen this.
+**Supersedes:** —
+
+### D-012 · Increment 1 · 2026-08-31 · The rolling reserve is held 45 days, not the documented 90–180
+**Decision:** `RESERVE_HOLD_DAYS = 45` against a 90-day extract, stated in `domain/rates.py`.
+**Why:** With a 90-day window and a 90-day hold, not one release originating inside the window ever
+lands inside it. The only interesting property of a reserve — that a release must be matched back to
+the cycle it came from — would go completely unexercised, and `RESERVE_RELEASE_UNMATCHED` would be
+untestable. 45 days puts both legs of the identity inside one extract. The mechanism is what is
+being modelled; the calendar constant is not what makes it credible.
+**What it rules out:** Presenting the hold period as realistic. It is documented as a deliberate
+deviation at the constant itself, so nobody reads it as a research result.
+**Supersedes:** —
+
+### D-013 · Increment 1 · 2026-08-31 · Two Sec 6 codes stay undeclared because the data cannot produce them
+**Decision:** `CHARGEBACK_FEE_UNBOOKED` and `PARTIAL_SETTLEMENT` are removed from `ExceptionType`
+with the reason recorded inline, joining `TDS_194O_VARIANCE`, `FX_VARIANCE` and
+`MULTI_GATEWAY_COLLISION` as declared-absent.
+**Why:** Our ERP view is sales-grain — it books invoices, not gateway expenses — so an unbooked fee
+has nowhere to be missing *from*. A batch split across cycles is a subset-sum target and belongs
+with Tier 2 rather than ahead of it. A taxonomy entry with no data behind it is a claim we cannot
+back, and §6 says to refine the list rather than adopt it.
+**What it rules out:** Quoting "17 of the brief's 20 exception types" as coverage. The honest number
+is the ones that fire, and the reasons the others do not are in the enum.
+**Supersedes:** —
+
+### D-014 · Increment 1 · 2026-08-31 · On an ambiguous UTR, Tier 0 links nothing
+**Decision:** When one UTR appears on two bank credits, Tier 0 raises `DUPLICATE_UTR` on both and
+creates **no** `BANK_TO_SETTLEMENT` edge for either. The settlement still counts as reached, so it
+does not also surface as a missing bank credit.
+**Why:** Linking one of two identical candidates is a coin flip presented as a fact. The cost is one
+recall point (measured: linkage recall 99.97% on dev, and the single miss is exactly this); the
+alternative cost is a precision error, and in reconciliation a confident wrong link is far more
+expensive than a gap — an analyst who trusts a link stops looking.
+**What it rules out:** Tie-breaking by value date, amount or row order. Any of those would produce a
+100% recall number that means less than the 99.97% one.
+**Supersedes:** —
+
+### D-015 · Increment 1 · 2026-08-31 · The residual is 100% mechanical BY CONSTRUCTION, and Inc 2 must decide what that means
+**Decision:** Record the measured residual distribution — every paise of Tier 0's Rs 3,96,133.81
+residual falls into a typed component (reserve 32%, refund offset 25%, transfers 20%, reserve
+release −13%, chargebacks 9%, fees 3%) with **zero** scatter — and record explicitly that this is a
+property of how the generator was built, not a discovery about reconciliation.
+**Why:** §13.1 makes the Inc 2 pivot depend on whether residuals are mechanical or scatter into
+ambiguity. Increment 1 answers "mechanical", but it answers it tautologically: the world was
+simulated from typed components, so of course they type. Presenting that as an empirical finding
+would be the circularity the brief warns about in a different costume. The honest statement is that
+**Increment 1 produced no genuine Tier-2 ambiguity**, and that this was not an accident of tuning.
+**What it rules out:** Concluding at this gate that Tier 2 is unnecessary. That conclusion needs
+either a deliberate decision to accept a Tier-1-closes-it submission (in which case the LLM's only
+defensible place is narration extraction, and the measured 100% → 0-of-22 parse gap is the argument
+for it), or the multi-gateway lever pulled to manufacture real ambiguity. Decide at the Inc 2 gate,
+on the post-Tier-1 residual.
+**Supersedes:** —
