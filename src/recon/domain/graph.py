@@ -88,6 +88,13 @@ class Tier(Enum):
     T4_HUMAN = 4           # queued for an analyst
 
 
+# The highest tier actually IMPLEMENTED in this build. One constant, read by the
+# false-clear split so that "we did not catch it" can be separated into "we
+# silently passed it" and "no resolver for that exists yet". Bump it in the same
+# commit that lands a tier -- never ahead of one.
+BUILT_TIER = 0
+
+
 class EdgeStatus(Enum):
     PROPOSED = "proposed"    # a candidate; not accepted, not counted
     MATCHED = "matched"      # linkage established, amounts NOT yet fully explained
@@ -101,24 +108,95 @@ class ExceptionType(Enum):
 
     `is_break` separates real breaks from explained-but-notable. Sec 6 is explicit
     that conflating them inflates the exception count and understates the agent.
+
+    TWO FURTHER AXES, ADDED IN INCREMENT 1
+    --------------------------------------
+    `detectable_at` is the lowest tier that can FLAG this class. Without it the
+    false-clear metric is uninterpretable, because "we did not flag it" bundles
+    two completely different failures:
+
+      * a break inside the built resolver's remit that it silently passed. This
+        is the dangerous class, and it must be ZERO.
+      * a break whose detection needs a tier that does not exist yet. Nothing
+        was cleared; nothing looked. Counting that as a false clear would make an
+        honest roadmap read as a defect, and would push us either to stop
+        generating realistic anomalies or to build every tier at once.
+
+    `resolvable` is whether ANY tier could ever close it, given the data. It is
+    a separate question from detection, and conflating the two was a real error
+    in the first cut of this enum: Tier 0 detects an orphan refund perfectly
+    well -- it can see the payment_id points at nothing -- and no tier, LLM
+    included, can ever link it, because the payment is not in the extract. The
+    honest claim is "we always find it and we can never fix it", which is
+    strictly stronger than "we cannot see it".
+
+    Exactly one class is unresolvable today, and it is the declared blind spot
+    (BRIEF Sec 5 asks for one, and says pretending to 100% reads as fake).
     """
 
-    MISSING_BANK_CREDIT = ("MISSING_BANK_CREDIT", True)
-    UNMATCHED_BANK_CREDIT = ("UNMATCHED_BANK_CREDIT", True)
-    AMOUNT_VARIANCE_UNEXPLAINED = ("AMOUNT_VARIANCE_UNEXPLAINED", True)
-    ROLLUP_MISMATCH = ("ROLLUP_MISMATCH", True)
-    BOOK_AMOUNT_MISMATCH = ("BOOK_AMOUNT_MISMATCH", True)
-    REFUND_ORPHANED = ("REFUND_ORPHANED", True)
-    NARRATION_UNPARSEABLE = ("NARRATION_UNPARSEABLE", True)
-    RESERVE_WITHHELD = ("RESERVE_WITHHELD", False)      # informational
-    REFUND_CROSS_CYCLE = ("REFUND_CROSS_CYCLE", False)  # timing, not a break
-    PERIOD_CUTOFF_TIMING = ("PERIOD_CUTOFF_TIMING", False)
-    # Sec 6 lists 20. Only Inc 0's seeded type plus the shape are needed now; the
-    # rest land in Inc 1-2 once the generator says which ones actually fire.
+    MISSING_BANK_CREDIT = ("MISSING_BANK_CREDIT", True, 0, True)
+    UNMATCHED_BANK_CREDIT = ("UNMATCHED_BANK_CREDIT", True, 0, True)
+    AMOUNT_VARIANCE_UNEXPLAINED = ("AMOUNT_VARIANCE_UNEXPLAINED", True, 0, True)
+    ROLLUP_MISMATCH = ("ROLLUP_MISMATCH", True, 0, True)
+    BOOK_AMOUNT_MISMATCH = ("BOOK_AMOUNT_MISMATCH", True, 0, True)
+    # The declared blind spot. Tier 0 DETECTS it perfectly (the payment_id points
+    # at nothing), and no tier can ever RESOLVE it, because the original capture
+    # is not in the extract. See generate/world.py::_build_orphan_refunds.
+    REFUND_ORPHANED = ("REFUND_ORPHANED", True, 0, False)
+    # Extraction from narration shapes no deterministic parser was written for.
+    NARRATION_UNPARSEABLE = ("NARRATION_UNPARSEABLE", True, 0, True)
+    # --- Increment 1: declared once the generator could actually produce them ---
+    # Needs the contracted rate card to know the fee was wrong. The report is
+    # internally consistent, so no identity over reported values can catch it.
+    MDR_SLAB_MISMATCH = ("MDR_SLAB_MISMATCH", True, 1, True)
+    GST_ON_MDR_MISMATCH = ("GST_ON_MDR_MISMATCH", True, 0, True)
+    RESERVE_RELEASE_UNMATCHED = ("RESERVE_RELEASE_UNMATCHED", True, 1, True)
+    # A reversal carrying a dispute_id but no order_id: it cannot be tied back
+    # to the sale it reverses. Sec 6 words this as "no corresponding book
+    # entry"; the mechanism here is the gateway's reference being absent,
+    # which is the same failure reached from the side we actually model.
+    CHARGEBACK_UNLINKED = ("CHARGEBACK_UNLINKED", True, 0, True)
+    DUPLICATE_UTR = ("DUPLICATE_UTR", True, 0, True)
+    DUPLICATE_PAYMENT = ("DUPLICATE_PAYMENT", True, 0, True)
+    # --- explained-but-notable: real, reportable, and NOT breaks (Sec 6) -------
+    # Typing an adjustment as a reserve needs the rate card: the Sec 3.1 schema
+    # has no field saying "this debit is a reserve", and reading it out of the
+    # free-text description would be the fuzzy matching Sec 9 warns against.
+    RESERVE_WITHHELD = ("RESERVE_WITHHELD", False, 1, True)
+    REFUND_CROSS_CYCLE = ("REFUND_CROSS_CYCLE", False, 0, True)  # timing, not a break
+    PERIOD_CUTOFF_TIMING = ("PERIOD_CUTOFF_TIMING", False, 0, True)
+    # on_hold=true, captured and never settled. The gateway is holding the money
+    # legitimately, so the books and the bank disagree CORRECTLY. Notable, not a
+    # break -- counting it as one would inflate the queue with correct behaviour.
+    ON_HOLD_NOT_SETTLED = ("ON_HOLD_NOT_SETTLED", False, 0, True)
+    # Sec 6 lists 20. Still undeclared, because the generator cannot yet produce
+    # them and a taxonomy entry with no data behind it is a claim we cannot back:
+    # TDS_194O_VARIANCE (out by persona), FX_VARIANCE (FX cut),
+    # MULTI_GATEWAY_COLLISION (held as the Inc 2 ambiguity lever),
+    # PARTIAL_SETTLEMENT (a batch split across cycles is a subset-sum target,
+    #   so it belongs with Tier 2 rather than ahead of it),
+    # CHARGEBACK_FEE_UNBOOKED (our ERP view is sales-grain: it has no expense
+    #   side, so an unbooked fee has nowhere to be missing FROM).
 
-    def __init__(self, code: str, is_break: bool) -> None:
+    def __init__(self, code: str, is_break: bool,
+                 detectable_at: int, resolvable: bool) -> None:
         self.code = code
         self.is_break = is_break
+        self.detectable_at = detectable_at
+        self.resolvable = resolvable
+
+    @property
+    def is_blind_spot(self) -> bool:
+        """Detectable, and never closeable: the evidence is not in the extract."""
+        return not self.resolvable
+
+    def in_remit_of(self, built_tier: int) -> bool:
+        """Is this class within the remit of a resolver built out to `built_tier`?
+
+        Drives the false-clear split. A break outside the remit was not cleared;
+        it was not looked at, and the metrics say which.
+        """
+        return self.detectable_at <= built_tier
 
 
 class ComponentType(Enum):
@@ -126,8 +204,19 @@ class ComponentType(Enum):
 
     MDR = "mdr"
     GST_ON_MDR = "gst_on_mdr"
-    # Inc 1+: TDS_194O, ROLLING_RESERVE, REFUND_OFFSET,
-    #         CHARGEBACK_REVERSAL, CHARGEBACK_FEE, FX_DIFF
+    # --- Increment 1: the rest of the Sec 3.3 deduction stack -----------------
+    # Sign convention: every component is a POSITIVE amount that reduces the
+    # gross-to-cash gap, except RESERVE_RELEASE, which is money coming back and
+    # is therefore carried negative. Keeping one convention means the residual is
+    # always `expected - actual - sum(components)` with no per-kind branching.
+    ROLLING_RESERVE = "rolling_reserve"
+    RESERVE_RELEASE = "reserve_release"          # negative: cash returning
+    REFUND_OFFSET = "refund_offset"
+    CHARGEBACK_REVERSAL = "chargeback_reversal"
+    CHARGEBACK_FEE = "chargeback_fee"
+    TRANSFER_OUT = "transfer_out"
+    INSTANT_SETTLEMENT_FEE = "instant_settlement_fee"
+    # Still absent, and deliberately: TDS_194O (out by persona), FX_DIFF (cut).
 
 
 @dataclass(frozen=True, slots=True)

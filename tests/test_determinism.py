@@ -9,20 +9,34 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from recon.generate.derive import generate
+from recon.generate.narration import SPLIT_DEV, SPLIT_EVAL
 from recon.generate.world import GenConfig
 from recon.resolve import pipeline
+
+# Increment 1 runs the determinism gate on BOTH seeds. The eval seed exercises a
+# different narration split and a different anomaly draw, so a determinism bug
+# that only bites when the parser fails -- a plausible shape, since that path
+# builds exceptions rather than edges -- would be invisible on dev alone.
+SEEDS = ("dev", "eval")
+
+
+def _split_for(seed: str) -> str:
+    return SPLIT_EVAL if seed == "eval" else SPLIT_DEV
 
 
 def _generate_into(root: Path, seed: str = "dev") -> Path:
     data_dir = root / "data"
-    generate(GenConfig(seed=seed, n_cycles=6), data_dir)
+    generate(GenConfig(seed=seed, n_days=24, split=_split_for(seed)), data_dir)
     return data_dir
 
 
-def test_generator_is_byte_identical_across_runs(tmp_path):
-    first = _generate_into(tmp_path / "a")
-    second = _generate_into(tmp_path / "b")
+@pytest.mark.parametrize("seed", SEEDS)
+def test_generator_is_byte_identical_across_runs(tmp_path, seed):
+    first = _generate_into(tmp_path / "a", seed)
+    second = _generate_into(tmp_path / "b", seed)
 
     for name in ("books.jsonl", "settlement_lines.jsonl", "settlements.jsonl",
                  "bank.jsonl", "ground_truth.json"):
@@ -30,8 +44,9 @@ def test_generator_is_byte_identical_across_runs(tmp_path):
             f"{name} differs between two runs of the same seed"
 
 
-def test_metrics_json_is_byte_identical_across_runs(tmp_path):
-    data_dir = _generate_into(tmp_path)
+@pytest.mark.parametrize("seed", SEEDS)
+def test_metrics_json_is_byte_identical_across_runs(tmp_path, seed):
+    data_dir = _generate_into(tmp_path, seed)
 
     first = pipeline.run(data_dir, tmp_path / "out1")
     second = pipeline.run(data_dir, tmp_path / "out2")

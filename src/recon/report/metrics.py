@@ -28,8 +28,9 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..domain.graph import EdgeKind, EdgeStatus, ReconEdge
+from ..domain.graph import BUILT_TIER, ComponentType, EdgeKind, EdgeStatus, ExceptionType, ReconEdge
 from ..domain.truth import GroundTruth
+from ..generate.narration import parse_utr
 from ..money import Paise, format_bps, format_inr, ratio_bps
 from .exceptions import ExceptionRecord
 
@@ -69,7 +70,14 @@ class Metrics:
     linkage_recall: Rate
     exception_detection_recall: Rate
     false_clear_rate: Rate
+    false_clear_in_remit: Rate
+    false_clear_out_of_remit: Rate
     exception_typing_accuracy: Rate
+    intrinsic_clean_rate: Rate
+    narration_parse_rate: Rate
+    residual_total: Paise = Paise(0)
+    residual_by_component: dict[str, int] = field(default_factory=dict)
+    injected_by_class: dict[str, int] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict:
@@ -89,7 +97,25 @@ class Metrics:
                 "linkage_recall": self.linkage_recall.to_json(),
                 "exception_detection_recall": self.exception_detection_recall.to_json(),
                 "false_clear_rate": self.false_clear_rate.to_json(),
+                "false_clear_in_remit": self.false_clear_in_remit.to_json(),
+                "false_clear_out_of_remit": self.false_clear_out_of_remit.to_json(),
                 "exception_typing_accuracy": self.exception_typing_accuracy.to_json(),
+            },
+            # Properties of the DATA, computed from ground_truth.json with no
+            # resolver involved. This is what the 85-92% realism target is checked
+            # against -- the resolver's own score answers a different question.
+            "data_realism": {
+                "intrinsic_clean_rate": self.intrinsic_clean_rate.to_json(),
+                "narration_parse_rate": self.narration_parse_rate.to_json(),
+                "injected_by_class": dict(sorted(self.injected_by_class.items())),
+            },
+            # What Tier 0 could not explain, bucketed by the component that TRULY
+            # accounts for it. The Increment 2 input: mechanical and typeable, or
+            # scattered and ambiguous?
+            "residual_distribution": {
+                "residual_total_paise": int(self.residual_total),
+                "by_component": dict(sorted(self.residual_by_component.items())),
+                "built_tier": BUILT_TIER,
             },
             "counts": dict(sorted(self.counts.items())),
         }
@@ -116,9 +142,31 @@ class Metrics:
             "  " + self.linkage_precision.line(),
             "  " + self.linkage_recall.line(),
             "  " + self.exception_detection_recall.line(),
-            "  " + self.false_clear_rate.line() + "   <-- the dangerous class",
+            "  " + self.false_clear_rate.line(),
+            "  " + self.false_clear_in_remit.line() + "   <-- the dangerous class",
+            "  " + self.false_clear_out_of_remit.line()
+            + f"   (needs tier > {BUILT_TIER})",
             "  " + self.exception_typing_accuracy.line(),
+            "",
+            "DATA REALISM (from ground truth, no resolver involved)",
+            "  " + self.intrinsic_clean_rate.line(),
+            "  " + self.narration_parse_rate.line(),
         ]
+        if self.residual_by_component:
+            lines += [
+                "",
+                f"RESIDUAL AT TIER {BUILT_TIER}, BY TRUE COMPONENT"
+                f"        total {format_inr(self.residual_total)}",
+            ]
+            # Share of gross movement, not of the net residual: RESERVE_RELEASE is
+            # negative, so shares against the net would sum well past 100% and
+            # read as an error.
+            denominator = max(1, sum(abs(v) for v in self.residual_by_component.values()))
+            for kind, amount in sorted(self.residual_by_component.items(),
+                                       key=lambda kv: (-abs(kv[1]), kv[0])):
+                share = ratio_bps(abs(amount), denominator)
+                lines.append(f"  {kind:<30} {format_inr(Paise(amount)):>18}"
+                             f"  {format_bps(share):>8} of movement")
         return "\n".join(lines)
 
 
@@ -177,12 +225,70 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
     exception_detection_recall = Rate(
         len(caught), len(truth_breaks), "exception detection recall (injected breaks caught)")
 
-    # FALSE-CLEAR: an injected break we did not flag is, by definition, one we
-    # silently passed as fine. The most dangerous error class in reconciliation:
-    # a missed match costs an analyst ten minutes, a false clear means money
-    # leaves the reconciliation and nobody looks again.
+    # FALSE-CLEAR: an injected break we did not flag is one we passed as fine.
+    # The most dangerous error class in reconciliation: a missed match costs an
+    # analyst ten minutes, a false clear means money leaves the reconciliation
+    # and nobody looks again.
+    #
+    # SPLIT BY REMIT, because the raw number conflates two different things. A
+    # break the built resolver was supposed to catch and did not is the dangerous
+    # class and must be zero. A break whose detection needs a tier that does not
+    # exist yet was never looked at -- reporting that as a silent pass would be
+    # self-flagellation, and worse, it would hide the real defects among it.
+    by_code = {e.code: e for e in ExceptionType}
+    missed_in_remit = {uid for uid in missed
+                       if by_code[truth_breaks[uid].anomaly].in_remit_of(BUILT_TIER)}
+    missed_out_of_remit = missed - missed_in_remit
+    in_remit_breaks = {uid for uid, unit in truth_breaks.items()
+                       if by_code[unit.anomaly].in_remit_of(BUILT_TIER)}
+
     false_clear_rate = Rate(len(missed), len(truth_breaks),
-                            "FALSE-CLEAR rate (breaks wrongly passed)")
+                            "FALSE-CLEAR rate, all breaks")
+    false_clear_in_remit = Rate(
+        len(missed_in_remit), len(in_remit_breaks),
+        f"FALSE-CLEAR within tier<={BUILT_TIER} remit")
+    false_clear_out_of_remit = Rate(
+        len(missed_out_of_remit), len(truth_breaks) - len(in_remit_breaks),
+        "not attempted (no resolver built yet)")
+
+    # --- properties of the DATA, not of the resolver --------------------------
+    # Answers "is the synthetic data too clean?" (BRIEF Sec 5: 85-92% cleanly
+    # resolvable). Computed from ground truth alone: the resolver's explanation
+    # rate answers a different question and must not be confused with this one.
+    clean_units = sum(1 for u in truth.units if u.anomaly is None)
+    intrinsic_clean_rate = Rate(clean_units, len(truth.units),
+                                "intrinsic clean rate (units with no injected anomaly)")
+    injected_by_class: dict[str, int] = {}
+    for unit in truth.units:
+        if unit.anomaly is not None:
+            injected_by_class[unit.anomaly] = injected_by_class.get(unit.anomaly, 0) + 1
+
+    # How often the DETERMINISTIC parser found a UTR at all. Reported per run, and
+    # a run is one narration split, so dev vs eval is a direct comparison. This is
+    # the number the Increment 3 LLM ablation has to beat -- published now, before
+    # any LLM exists, so it cannot be chosen after the fact.
+    parsed = sum(1 for credit in repo.bank.values()
+                 if parse_utr(credit.narration) is not None)
+    narration_parse_rate = Rate(parsed, len(repo.bank),
+                                "narration parse rate (UTR extracted by regex)")
+
+    # --- what the built tier could not explain, by its TRUE cause -------------
+    # Tier 0 types MDR and GST from reported values, so its residual on a
+    # settlement is exactly the sum of every OTHER true component. Bucketing it
+    # that way says how much of the gap an arithmetic Tier 1 could reach, and how
+    # much would still be scattered -- which is the Increment 2 fork.
+    tier0_typed = {ComponentType.MDR.value, ComponentType.GST_ON_MDR.value}
+    residual_by_component: dict[str, int] = {}
+    residual_total = 0
+    for edge in bank_edges:
+        if edge.status is EdgeStatus.EXPLAINED or edge.decomposition is None:
+            continue
+        residual_total += int(edge.decomposition.residual)
+        for component in truth.components.get(edge.dst_uid, ()):
+            if component.kind in tier0_typed:
+                continue
+            residual_by_component[component.kind] = (
+                residual_by_component.get(component.kind, 0) + component.amount)
 
     # Typing: of the breaks we caught, did we give them the right code?
     by_subject: dict[str, str] = {}
@@ -219,6 +325,13 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         linkage_recall=linkage_recall,
         exception_detection_recall=exception_detection_recall,
         false_clear_rate=false_clear_rate,
+        false_clear_in_remit=false_clear_in_remit,
+        false_clear_out_of_remit=false_clear_out_of_remit,
         exception_typing_accuracy=exception_typing_accuracy,
+        intrinsic_clean_rate=intrinsic_clean_rate,
+        narration_parse_rate=narration_parse_rate,
+        residual_total=Paise(residual_total),
+        residual_by_component=residual_by_component,
+        injected_by_class=injected_by_class,
         counts=counts,
     )

@@ -59,6 +59,16 @@ class Repository:
     def settlement_by_utr(self) -> dict[str, SettlementRow]:
         return {s.utr.lower(): s for s in self.settlements.values()}
 
+    def payments_by_payment_id(self) -> dict[str, SettlementLineRow]:
+        """Index for the REFUND_TO_PAYMENT join.
+
+        Payment lines only. A refund carries the payment_id of the capture it
+        reverses, so indexing every line type here would let a refund match
+        itself and turn the grain into a self-loop.
+        """
+        return {line.payment_id: line for line in self.lines.values()
+                if line.type == "payment" and line.payment_id is not None}
+
     # -- graph units -----------------------------------------------------------
 
     def units(self) -> list[ReconUnit]:

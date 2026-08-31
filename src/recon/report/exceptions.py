@@ -58,6 +58,31 @@ PLAYBOOK: dict[ExceptionType, tuple[str, str]] = {
         "No UTR could be extracted from the narration. Match manually and add the "
         "narration shape to the template registry.",
         "finance-ops"),
+    ExceptionType.MDR_SLAB_MISMATCH: (
+        "Fee charged does not match the contracted slab for this method/network/card "
+        "type. Quote the rate card version and the affected entity_ids to the gateway; "
+        "the overcharge is recoverable.",
+        "finance-ops"),
+    ExceptionType.GST_ON_MDR_MISMATCH: (
+        "tax is not 18% of the MDR base, so the Input Tax Credit claimed against this "
+        "line is wrong. Hold the ITC claim for this line pending a corrected invoice.",
+        "tax"),
+    ExceptionType.RESERVE_RELEASE_UNMATCHED: (
+        "A reserve release could not be tied to the cycle it was withheld from. Confirm "
+        "against the gateway's reserve ledger before recognising the credit.",
+        "treasury"),
+    ExceptionType.CHARGEBACK_UNLINKED: (
+        "Dispute reversal carries no order reference. Pull the dispute from the gateway "
+        "dashboard by dispute_id to identify the original sale before writing it off.",
+        "finance-ops"),
+    ExceptionType.DUPLICATE_UTR: (
+        "One UTR on two credits. Confirm with the bank whether the money arrived once or "
+        "twice; do NOT link either credit until that is answered.",
+        "treasury"),
+    ExceptionType.DUPLICATE_PAYMENT: (
+        "One order carries two settled payment lines. Confirm the customer was charged "
+        "twice, then raise a refund for the duplicate capture.",
+        "finance-ops"),
     ExceptionType.RESERVE_WITHHELD: (
         "Informational: rolling reserve withheld. Confirm the release date is tracked.",
         "treasury"),
@@ -67,6 +92,10 @@ PLAYBOOK: dict[ExceptionType, tuple[str, str]] = {
     ExceptionType.PERIOD_CUTOFF_TIMING: (
         "Informational: straddles the period close. Must not be counted as a break.",
         "finance-ops"),
+    ExceptionType.ON_HOLD_NOT_SETTLED: (
+        "Informational: captured but held by the gateway, so no cash moved. Carry as "
+        "in-transit receivable; escalate only if the hold outlives the dispute window.",
+        "treasury"),
 }
 
 

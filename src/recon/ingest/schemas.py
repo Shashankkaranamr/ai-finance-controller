@@ -39,7 +39,15 @@ class BookEntryRow(BaseModel):
 
 
 class SettlementLineRow(BaseModel):
-    """Razorpay settlement recon line item (BRIEF Sec 3.1)."""
+    """Razorpay settlement recon line item -- the full BRIEF Sec 3.1 field set.
+
+    OPTIONALITY IS LOAD-BEARING HERE. A refund carries no `card_network`; a
+    reserve adjustment carries no `order_id`; only a dispute line carries a
+    `dispute_id`. Each of those is `str | None` rather than defaulted to "",
+    because collapsing "absent" into "empty" makes a missing join key
+    indistinguishable from a present-but-blank one, and the join then fails
+    silently instead of loudly.
+    """
 
     model_config = _STRICT
 
@@ -55,11 +63,20 @@ class SettlementLineRow(BaseModel):
     settled: bool
     created_at: date
     settled_at: date
+    posted_at: date
     settlement_id: str
     settlement_utr: str
-    payment_id: str
-    order_id: str
-    method: str
+    credit_type: str
+    description: str = ""
+    notes: str = ""
+    payment_id: str | None = None
+    order_id: str | None = None
+    order_receipt: str | None = None
+    method: str | None = None
+    card_network: str | None = None
+    card_issuer: str | None = None
+    card_type: str | None = None
+    dispute_id: str | None = None
 
     @property
     def uid(self) -> str:
@@ -69,6 +86,12 @@ class SettlementLineRow(BaseModel):
     def net(self) -> int:
         """Signed contribution to the settlement rollup."""
         return self.credit - self.debit
+
+    @property
+    def is_settled_payment(self) -> bool:
+        """Counts toward expected gross. An on-hold line is reported but has not
+        moved, so including it would manufacture a residual that is ours."""
+        return self.type == "payment" and self.settled
 
 
 class SettlementRow(BaseModel):

@@ -33,27 +33,38 @@ rather than a workaround. See test_brief_transfer_example_violates_its_own_gst_r
 from __future__ import annotations
 
 from ..money import Paise, apply_rate_bps
+from .rates import GST_RATE_BPS, RULE_VERSION  # noqa: F401  -- re-exported below
 
-# --- Contracted rates for Increment 0 -----------------------------------------
-# A single flat slab. Inc 1 replaces this with a real method/network/card-type
-# table; MDR_SLAB_MISMATCH becomes meaningful at that point, not before.
+# --- Contracted rates ---------------------------------------------------------
+# The rate CARD lives in domain/rates.py, which is the single source of truth for
+# what a fee should have been. This module owns the arithmetic that turns a rate
+# into a fee, and the identities that must hold over the result.
+#
+# MDR_RATE_BPS is the Increment 0 flat rate, kept only as the default for
+# `quote_fee`. Increment 1 quotes per instrument via `quote_fee_at`, because a
+# single rate makes MDR_SLAB_MISMATCH undetectable by construction.
 MDR_RATE_BPS = 200    # 2.00%
-GST_RATE_BPS = 1800   # 18% on the MDR base
-
-RULE_VERSION = "inc0.flat-mdr-200bps.gst-1800bps"
 
 
 # --- Fee construction (generator side) ----------------------------------------
 
-def quote_fee(amount: Paise) -> tuple[Paise, Paise, Paise]:
-    """Return (mdr_base, tax, fee) for a gross amount, fee INCLUSIVE of tax.
+def quote_fee_at(amount: Paise, mdr_rate_bps: int) -> tuple[Paise, Paise, Paise]:
+    """Return (mdr_base, tax, fee) at a given MDR rate, fee INCLUSIVE of tax.
 
-    This is the canonical rule referenced in the module docstring: compute the
-    MDR base from gross, then GST on that base, then fee = base + tax.
+    The canonical rule referenced in the module docstring: compute the MDR base
+    from gross, then GST on that base, then fee = base + tax. Rounding is
+    half-up at each step, which is what makes the result reproducible rather
+    than dependent on evaluation order.
     """
-    base = apply_rate_bps(amount, MDR_RATE_BPS)
+    base = apply_rate_bps(amount, mdr_rate_bps)
     tax = apply_rate_bps(base, GST_RATE_BPS)
     return base, tax, Paise(int(base) + int(tax))
+
+
+def quote_fee(amount: Paise) -> tuple[Paise, Paise, Paise]:
+    """`quote_fee_at` at the Increment 0 flat rate. Kept for the identity tests,
+    which are about the arithmetic and not about any particular slab."""
+    return quote_fee_at(amount, MDR_RATE_BPS)
 
 
 # --- Identity checks (resolver side) ------------------------------------------
@@ -68,8 +79,18 @@ def expected_gst(base: Paise) -> Paise:
 
 
 def gst_on_mdr_holds(fee: Paise, tax: Paise) -> bool:
-    """tax == round_half_up(mdr_base * 18%). Fires GST_ON_MDR_MISMATCH when False."""
-    return int(tax) == int(expected_gst(mdr_base(fee, tax)))
+    """tax == round_half_up(mdr_base * 18%). Fires GST_ON_MDR_MISMATCH when False.
+
+    Total over every input, including nonsense. `tax` reported ABOVE `fee` makes
+    the MDR base negative, which is impossible when fee is inclusive of tax -- so
+    it is the strongest possible form of this mismatch, and the honest answer is
+    False rather than an exception. A checker that crashes on the very data it
+    exists to catch is a checker that gets wrapped in a try/except and ignored.
+    """
+    base = mdr_base(fee, tax)
+    if int(base) < 0:
+        return False
+    return int(tax) == int(expected_gst(base))
 
 
 def payment_credit(amount: Paise, fee: Paise) -> Paise:

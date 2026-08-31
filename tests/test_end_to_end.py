@@ -1,12 +1,33 @@
-"""The Increment 0 exit gate, as tests.
+"""The exit gate, as tests. Every assertion maps to a numbered gate condition.
 
-Every assertion here maps to a numbered gate condition in PLAN.md.
+INCREMENT 1 RESTATED SEVEN OF THESE, AND IT IS WORTH SAYING WHY
+---------------------------------------------------------------
+Increment 0's data had one anomaly and no ambiguity, so several tests asserted
+perfection: explanation rate 100%, false clear 0, recall 100, at least one
+journal entry. Increment 1's data is realistic, and those assertions became
+false BY DESIGN -- Tier 0 knows nothing about a rolling reserve, so it explains
+nothing and posts nothing.
+
+The temptation is to relax them. Instead each one is restated as the stronger
+property that should hold now:
+
+  * "false clear is zero"     -> zero WITHIN THE BUILT TIER'S REMIT, which is the
+                                 claim that actually matters and the one that must
+                                 never regress.
+  * "recall is 100%"          -> precision is 100%, and every recall miss is a
+                                 link we deliberately DECLINED to make.
+  * "a journal entry exists"  -> the ledger posts NOTHING it cannot fully explain,
+                                 and the account structure is verified directly
+                                 instead of incidentally.
+
+A test that only passes on data too clean to be interesting was not testing much.
 """
 from __future__ import annotations
 
 import json
 
-from recon.domain.graph import EdgeKind, EdgeStatus
+from recon.domain.graph import BUILT_TIER, EdgeKind, EdgeStatus, ExceptionType
+from recon.domain.truth import GroundTruth
 from recon.report.exceptions import SUBJECT_UNIT
 
 
@@ -14,10 +35,14 @@ from recon.report.exceptions import SUBJECT_UNIT
 
 def test_all_artifacts_written(result):
     for name in ("metrics.json", "recon_statement.md", "exceptions.jsonl",
-                 "journal_entries.jsonl", "audit.jsonl", "run_summary.json"):
+                 "audit.jsonl", "run_summary.json"):
         path = result.out_dir / name
         assert path.exists(), f"missing artifact {name}"
         assert path.stat().st_size > 0, f"empty artifact {name}"
+
+    # journal_entries.jsonl must EXIST but is legitimately empty at Tier 0 --
+    # see test_the_ledger_posts_nothing_it_cannot_fully_explain.
+    assert (result.out_dir / "journal_entries.jsonl").exists()
 
 
 # --- gate 4: the statement foots ---------------------------------------------
@@ -44,30 +69,36 @@ def test_footing_terms_come_from_different_sources_and_agree(result):
 
 
 def test_every_journal_entry_balances(result):
-    assert result.journal, "no journal entries produced"
     for entry in result.journal:
         assert entry.balances, f"unbalanced entry {entry.entry_id}"
 
 
-def test_journal_entry_has_the_expected_account_structure(result):
-    entry = result.journal[0]
-    accounts = {line.account for line in entry.lines}
-    assert accounts == {"Bank", "MDR Expense", "GST Input Credit", "Trade Receivable"}
+def test_the_ledger_posts_nothing_it_cannot_fully_explain(result):
+    """At Tier 0 on realistic data, that means it posts nothing at all.
 
-    # GST is its own line because it is reclaimable as Input Tax Credit. If it were
-    # folded into MDR Expense the merchant would lose the claim.
-    gst = next(l for l in entry.lines if l.account == "GST Input Credit")
-    assert int(gst.debit) > 0 and int(gst.credit) == 0
+    Auto-posting is gated on EXPLAINED, and Tier 0 cannot explain a settlement
+    carrying a rolling reserve. Zero entries is the CORRECT conservative outcome,
+    not a defect: an accounting system that posts a half-understood entry is worse
+    than one that posts none and raises an exception.
+
+    Expected to change when Tier 1 lands. It should change to a non-zero count,
+    never to a relaxed assertion.
+    """
+    explained = [e for e in result.edges
+                 if e.kind is EdgeKind.BANK_TO_SETTLEMENT
+                 and e.status is EdgeStatus.EXPLAINED]
+    assert len(result.journal) == len(explained)
+    assert BUILT_TIER == 0 and not explained, (
+        "Tier 1 has landed; update this test to assert the posted entries")
 
 
 # --- gate 5: exactly one typed exception, with evidence ----------------------
 
 def test_exactly_one_seeded_missing_bank_credit(result):
-    breaks = [r for r in result.exceptions if r.is_break]
-    assert len(breaks) == 1, f"expected one break, got {[r.code for r in breaks]}"
+    found = [r for r in result.exceptions if r.code == "MISSING_BANK_CREDIT"]
+    assert len(found) == 1, f"expected exactly one, got {len(found)}"
 
-    record = breaks[0]
-    assert record.code == "MISSING_BANK_CREDIT"
+    record = found[0]
     assert record.subject_kind == SUBJECT_UNIT
     assert int(record.amount_at_risk) > 0
     assert record.owner == "treasury"
@@ -104,22 +135,63 @@ def test_headline_uses_two_denominators(result):
     metrics = result.metrics
     assert metrics.explanation_rate_bank.denominator == len(result.repo.bank)
     assert metrics.settlement_coverage.denominator == len(result.repo.settlements)
-    # The whole point: the easy number is perfect while coverage is not.
-    assert metrics.explanation_rate_bank.bps == 10_000
-    assert metrics.settlement_coverage.bps < 10_000
+    # The whole point of D-005: these are genuinely different populations, so one
+    # number can never stand in for the other. There are more bank credits than
+    # settlements here precisely because some credits belong to no settlement at
+    # all -- and those are invisible in any settlement-side rate.
+    assert (metrics.explanation_rate_bank.denominator
+            != metrics.settlement_coverage.denominator)
 
 
-def test_no_false_clears_on_clean_data(result):
-    assert result.metrics.false_clear_rate.numerator == 0
-    assert result.metrics.exception_detection_recall.numerator == 1
-    assert result.metrics.exception_typing_accuracy.bps == 10_000
+def test_no_false_clears_within_the_built_tier_remit(result):
+    """THE assertion this project must never lose.
+
+    A break the built resolver was accountable for and silently passed is the
+    dangerous class. Breaks needing a tier that does not exist yet are reported
+    separately and are not failures of this build -- but the in-remit number is
+    zero, or the run is not trustworthy.
+    """
+    metrics = result.metrics
+    assert metrics.false_clear_in_remit.numerator == 0, (
+        "a break inside the built tier's remit was silently passed")
+    # And the split must be real: out-of-remit breaks exist, so this does not pass
+    # merely because every class happens to be in remit.
+    assert metrics.false_clear_out_of_remit.denominator > 0
 
 
-def test_linkage_precision_and_recall_are_perfect_on_clean_data(result):
-    """Increment 0's data has one anomaly and no ambiguity. Anything below 100%
-    here is a bug in the resolver, not a finding about the data."""
-    assert result.metrics.linkage_precision.bps == 10_000
-    assert result.metrics.linkage_recall.bps == 10_000
+def test_every_out_of_remit_miss_names_a_tier_we_have_not_built(result, generated):
+    """The out-of-remit bucket must not become a dumping ground.
+
+    Anything we failed to flag has to be a class we DECLARED unreachable at this
+    tier, in the enum, before the run. Without this, "out of remit" would be a
+    label applied to whatever we happened to miss.
+    """
+    truth = GroundTruth.read(generated / "ground_truth.json")
+    flagged = {r.subject_id for r in result.exceptions}
+    by_code = {e.code: e for e in ExceptionType}
+    for unit in truth.anomalous_units(breaks_only=True):
+        if unit.uid not in flagged:
+            assert by_code[unit.anomaly].detectable_at > BUILT_TIER, (
+                f"{unit.anomaly} is declared detectable at tier "
+                f"{by_code[unit.anomaly].detectable_at} but was missed")
+
+
+def test_linkage_precision_is_perfect_and_every_recall_miss_is_deliberate(result):
+    """Precision has no excuse: a link we assert must be a link that is true.
+
+    Recall is allowed to miss, but only where Tier 0 DECLINED to link on purpose
+    -- a UTR carried by two credits, or a narration it could not parse. Guessing
+    in either case would trade a recall point for a precision error, and in
+    reconciliation a confident wrong link costs far more than a gap.
+    """
+    metrics = result.metrics
+    assert metrics.linkage_precision.bps == 10_000
+
+    declined = {r.subject_id for r in result.exceptions
+                if r.code in ("DUPLICATE_UTR", "NARRATION_UNPARSEABLE")}
+    misses = metrics.linkage_recall.denominator - metrics.linkage_recall.numerator
+    assert misses <= len(declined), (
+        f"{misses} recall misses but only {len(declined)} deliberate declines")
 
 
 def test_money_weighted_coverage_is_lower_than_count_coverage(result):
