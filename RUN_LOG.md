@@ -420,7 +420,8 @@ at, and the ablation number for "without it" is already published.
 > ## OVERNIGHT SUMMARY — read this first
 >
 > **Worked autonomously 01 Sep.** Increment 2 (Tier 1) and Increment 3 (fenced adjudicator) both
-> closed. 156 tests green, 8 commits, all pushed. Working tree clean.
+> closed. **156 tests green, 10 commits, all pushed, working tree clean.** Verified on a fresh clone
+> with `data/` deleted, not just locally — see F-011 for why that distinction cost me a wrong entry.
 >
 > **The one thing to look at first:** the table under *The fence, measured* below — specifically the
 > `hostile` row. 22 plausible-but-wrong UTRs proposed, **22 blocked, 0 edges created, linkage
@@ -442,6 +443,14 @@ at, and the ablation number for "without it" is already published.
 >   **nowhere**. The oracle number below is an upper bound, labelled as such.
 > - **D-023** — Tier 3 honours Tier 0's ambiguity refusal (D-014). Found by precision dropping to
 >   99.97%.
+>
+> **A mistake I made and corrected, worth your attention more than the features:** I recorded gate
+> condition 8 as PASS because 156 tests passed *locally*, then measured it as written and found
+> **nine failures on a clean clone** — the new tests read the held-out seed out of the working tree,
+> and `data/` is gitignored. Fixed and re-verified properly. The correction sits under the original
+> row rather than replacing it, and the process failure is logged as **F-011**, because marking a
+> condition passed on a *related* observation instead of the stated one is exactly what the gate
+> ritual exists to stop — and unsupervised is when nobody else catches it.
 >
 > **Flagged for your sign-off, deliberately not done:** `README.md` still carries Increment 1's
 > numbers and now understates the system considerably (it says explanation rate 0%; it is 83.33% on
