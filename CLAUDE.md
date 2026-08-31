@@ -42,32 +42,49 @@ estimates. If you feel the urge to plan the whole build, re-read §13.1.
 
 ## Current state
 
-**Increment 0 — CLOSED 25 Aug 2026.** All 7 gate conditions passed.
-**Increment 1 — CLOSED 31 Aug 2026.** All 12 gate conditions passed. **124 tests green.**
-Next: **Increment 2 — Tier 1 arithmetic variance decomposition. The pivot.**
+**Increment 0 — CLOSED 25 Aug 2026.** · **Increment 1 — CLOSED 31 Aug 2026.**
+**Increment 2 (Tier 1) — CLOSED 01 Sep 2026.** · **Increment 3 (fenced adjudicator) — CLOSED 01 Sep 2026.**
+**156 tests green.** Next: **Increment 6 — artifacts. Protected, 2 days.**
 
-**Read `RUN_LOG.md`'s Increment 1 section before planning Increment 2.** The pivot depends on it, and
-D-015 is the entry that decides the shape of the submission.
+Increments 2 and 3 were built **autonomously overnight**. D-018 through D-023 were taken without
+review and are marked in the Decisions Log as open for override. **Read RUN_LOG.md's Increment 3
+entry first — it opens with an overnight summary.**
+
+### The headline numbers
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate · coverage | 83.33% (20/24) · 90.91% (20/22) | 0.00% — no linkage; see below |
+| Decomposition closure (no linkage, no truth) | 100.00% (22/22) | 100.00% (22/22) |
+| False-clear, in remit | 0.00% (0/192) | 0.00% (0/184) |
+| Narration parse rate | 100.00% | 8.33% (truly 0 of 22 settlement narrations) |
+| Ablation | T0 0.00% -> T1 83.33% | T0/T1 0.00%, T3-with-oracle 87.50% |
+
+**Hostile adjudicator: 22 proposals, 22 blocked, 0 edges, precision 100.00%.**
 
 ### What exists
 
-Tier 0 resolver, complete for its declared remit (exact-key joins incl. `REFUND_TO_PAYMENT`,
-cardinality violations, flag/date reads, per-line GST identity) · faithful world simulator: full
-Sec 3.1 schema, all four line types, the whole Sec 3.3 deduction stack except TDS 194-O · contracted
-MDR slab table (`domain/rates.py`) · dev + **held-out eval seed** with template-level narration split
-· `eval` subcommand (D-007 closed) · ingest with Pydantic validation and quarantine · metrics with
-false-clear **split by tier remit**, intrinsic clean rate and residual distribution · reconciliation
-statement that foots · balanced journal entries · typed exception queue with evidence · append-only
-audit log · LLM seam as a null implementation · determinism contract, verified on both seeds.
+Tier 0 (exact-key joins, cardinality, flags, GST identity) · **Tier 1** (full deduction stack typed
+against `domain/rates.py`, off-contract fee detection) · **Tier 3** (LLM fenced to narration parsing,
+verifier gate, `blocked_hallucination`, cache) · faithful generator, dev + held-out eval · statement
+foots, journal entries post and balance · typed prioritised queue · audit log · determinism on both
+seeds · degraded mode on every run.
 
-### What deliberately does NOT exist yet
+### What does NOT exist
 
-Tier 1 decomposition · Tier 2 · any LLM call · ablation table · any UI · `ARCHITECTURE.md`
-(Increment 6). **CUT, not pending:** second merchant scenario · FX · TDS 194-O (D-011).
+Tier 2 (**CUT**, D-016) · multi-gateway (**CUT**) · second merchant (**CUT**) · FX (**CUT**) ·
+TDS 194-O (out by persona) · any UI · `ARCHITECTURE.md` (Increment 6).
 
-`REFUND_TO_PAYMENT` was the part of the grain model most likely to be wrong. Increment 1 exercised it
-against 60+ cross-cycle refunds per seed and **it holds** — the binary edge expresses them without
-strain. That uncertainty is closed.
+**No API key in this environment**, so the LLM's real extraction accuracy is **unmeasured and
+claimed nowhere** (D-022). The oracle figure is an upper bound, labelled as such everywhere it
+appears. With a key, one `recon eval` run with the adjudicator wired in produces the real number.
+
+### NEEDS SIGN-OFF BEFORE IT SHIPS
+
+`README.md` still carries Increment 1's numbers and now **understates the system badly** — it reports
+explanation rate 0.00% where dev is 83.33%, and it predates Tier 1, Tier 3 and the fence entirely.
+Rewriting it changes the project's public framing, so it was deliberately left alone overnight. It is
+the first Increment 6 task.
 
 ---
 
@@ -78,14 +95,14 @@ strain. That uncertainty is closed.
 ./.venv/Scripts/python.exe -m recon eval     # the HELD-OUT seed: different world AND narrations
 ./.venv/Scripts/python.exe -m recon generate --seed dev --days 88
 ./.venv/Scripts/python.exe -m recon run --seed dev
-./.venv/Scripts/python.exe -m pytest         # 124 tests; use bare pytest, NOT -q (addopts already has it)
+./.venv/Scripts/python.exe -m pytest         # 156 tests; use bare pytest, NOT -q (addopts already has it)
 ```
 
 The venv is at `.venv/`. `make` and `uv` are **not installed** on this machine — `python -m recon`
 is the real entrypoint and the Makefile is only a forwarder for reviewers. Windows, Python 3.13.
 
-Clean clone → working demo measured at **27 s** against a 300 s gate, at ~4x Increment 0's data
-(57 s was the Inc 0 figure, on the old OneDrive path — see D-008). Protect that: dependencies are
+Clean clone → working demo measured at **27–65 s** against a 300 s gate (the spread is machine
+load, not code; 57 s was the Inc 0 figure on the old OneDrive path — see D-008). Protect that: dependencies are
 `pydantic` + `pytest` and nothing else. No pandas/polars until a profile says otherwise.
 
 ---
@@ -123,6 +140,12 @@ Clean clone → working demo measured at **27 s** against a 300 s gate, at ~4x I
     our bug (F-006).
 12. **A gate condition verified on one seed is not verified.** Parameterise over `dev` and `eval`
     (F-009).
+13. **A gate condition is measured the way it is written, or it is not measured.** "Tests green
+    locally" is not evidence about a clean clone, and no amount of it becomes evidence. Tests must
+    never read `data/generated/` from the working tree — use the conftest fixtures (F-011).
+14. **The verifier gate is necessary, not sufficient.** It blocks a wrong answer; it does not block a
+    *correct* answer to an ambiguous question. "The model was correct" and "the action was safe" are
+    different questions and only the second one matters at the gate (D-023).
 
 ---
 

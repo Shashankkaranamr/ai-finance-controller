@@ -232,4 +232,31 @@ the Increment 1 entry so a reviewer reproducing it is not surprised.
 
 ---
 
+### F-011 · 01 Sep 2026 · A gate condition was recorded PASS before it was measured
+
+**What broke.** Increment 3's gate condition 8 read "pytest green; float scan total; clean clone
+inside 300 s", and I recorded **PASS** on the strength of 156 tests passing locally. Measuring the
+clean clone afterwards found **nine failures**: `FileNotFoundError: data/generated/eval/bank.jsonl`.
+
+**Cause.** The Tier 1 and Tier 3 test modules read the held-out seed straight out of
+`data/generated/eval` in the working tree, instead of the session fixtures `conftest.py` already
+provides. `data/` is gitignored, so it exists only for someone who has run the CLI — which I had.
+The suite was therefore testing "did somebody remember to run `python -m recon eval` first".
+
+**Why it mattered more than the bug.** The bug is ten minutes' work. The process failure is the
+finding: a gate condition was written into RUN_LOG as passing on the basis of a *related* observation
+(local tests are green) rather than the stated one (a clean clone is green). That is precisely the
+error the gate ritual exists to prevent, and it happened while working unsupervised, which is when it
+is least likely to be caught by anyone else.
+
+**Recovery.** Both modules take the fixtures, which generate into `tmp_path`. Verified the way the
+condition is actually worded: a fresh `git clone`, a fresh venv, `data/` deleted outright, and then
+**156 passed**. Clean clone to working demo measured at **50.8 s** against the 300 s gate.
+
+**Standing consequence.** A gate condition is measured the way it is written or it is not measured.
+"Green locally" is not evidence about a clean clone, and no amount of it becomes evidence. The
+Increment 3 entry in RUN_LOG carries a dated correction rather than a silent edit.
+
+---
+
 <!-- New entries below. Keep the date, what broke, why it mattered, and the recovery. -->

@@ -475,6 +475,15 @@ at, and the ablation number for "without it" is already published.
 | 8 | `pytest` green; float scan total; clean clone in gate | PASS — **156 tests** |
 | 9 | No claim about real LLM accuracy | PASS — asserted nowhere; see D-022 |
 
+> **Correction, 01 Sep 2026 (same day).** Condition 8 above was first recorded PASS on the
+> strength of 156 tests passing *locally*. Measuring it as written then found **nine failures
+> on a clean clone** — the Tier 1 and Tier 3 modules read the held-out seed out of the working
+> tree instead of the conftest fixtures, and `data/` is gitignored. Fixed, and re-verified the
+> way the condition is worded: fresh clone, fresh venv, `data/` deleted, **156 passed**; clean
+> clone to working demo **50.8 s** against a 300 s gate. The original row is left as written.
+> The process failure is the point and is logged as **F-011**: a gate condition is measured the
+> way it is written, or it is not measured.
+
 ### What this taught us
 
 **1. The verifier was necessary and not sufficient, and that is the most useful thing here.**
