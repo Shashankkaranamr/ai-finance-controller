@@ -305,3 +305,110 @@ residual to zero, is the submission "deterministic arithmetic closes it, and the
 defensible place is narration extraction" — for which the measured 100% -> 0-of-22 parse gap is the
 argument — or is the multi-gateway lever pulled to manufacture genuine ambiguity? Both are good
 submissions. They are different submissions.
+
+---
+
+## Increment 2 — Tier 1 arithmetic variance decomposition · gate reached 01 Sep 2026
+
+**Built autonomously overnight** under the standing protocol. Every decision taken without review is
+in the Decisions Log marked as such and is open to be overridden.
+
+### At a glance
+
+| | dev | eval (held out) |
+|---|---|---|
+| **Explanation rate · settlement coverage** | **83.33% (20/24) · 90.91% (20/22)** | 0.00% (0/24) · 0.00% (0/22) |
+| **Decomposition closure** *(no linkage, no truth)* | **100.00% (22/22)** | **100.00% (22/22)** |
+| Circularity split — schema · contract | 49.70% · 50.30% | 49.41% · 50.59% |
+| **False-clear, in remit** | **0.00% (0/192)** | **0.00% (0/184)** |
+| Exception detection recall | 100.00% (192/192) | 100.00% (184/184) |
+| Linkage precision | 100.00% (3,388/3,388) | 100.00% (3,488/3,488) |
+| Exception typing accuracy | 100.00% (192/192) | 99.46% (183/184) |
+| Journal entries (all balanced) | 20 | 0 |
+| Statement | **foots to zero** | **foots to zero** |
+
+### Exit gate
+
+| # | Condition | Result |
+|---|---|---|
+| 1 | Explanation rate AND settlement coverage, both seeds | PASS (measured, not targeted) — see above |
+| 2 | Every EXPLAINED edge has residual == 0, all components typed | PASS — 20 dev edges, zero remaining `AMOUNT_VARIANCE_UNEXPLAINED` |
+| 3 | `BUILT_TIER == 1`; **false-clear in remit 0.00%** | **PASS — 0/192 dev, 0/184 eval** |
+| 4 | `MDR_SLAB_MISMATCH` detection recall | PASS — 83/83 dev, 80/80 eval (was 0 at Inc 1) |
+| 5 | **Circularity partition published** | **PASS — ~49% schema / ~51% contract, both seeds** |
+| 6 | Ablation table falls out by construction | PASS — T0 0.00%, T0+T1 83.33%, delta +83.33% |
+| 7 | Journal entries post; statement foots, both seeds | PASS — 20 entries dev, all balanced; foots on both |
+| 8 | Determinism per seed, incl. regeneration | PASS — byte-identical on dev and eval |
+| 9 | `pytest` green; float scan still total | PASS — **138 tests** |
+| 10 | Clean clone inside 300 s | PASS — **65 s** (see note on variance) |
+
+### What this taught us
+
+**1. The ablation is not "Tier 1 helped". It is the whole system.**
+T0 alone explains **0.00%** of bank credits on realistic data; T0+T1 explains **83.33%**. Tier 0
+finds the counterparty and proves the report is internally consistent, and that is worth having —
+but on a merchant with a reserve it cannot explain a single rupee of the gross-to-cash gap. The
+brief's thesis, that explaining the amount is the job, is now a measured number rather than a claim.
+
+**2. The four unexplained credits are not decomposition failures.**
+They are the two `UNMATCHED_BANK_CREDIT`s (no settlement behind them) and the `DUPLICATE_UTR` pair
+that Tier 0 deliberately declines to link (D-014). **Every settlement Tier 1 could reach, it closed.**
+Explanation rate is bounded by linkage here, not by arithmetic — which is exactly what the next
+increment has to attack.
+
+**3. THE CIRCULARITY ANSWER, which was the point of this gate.**
+Explanation rate on eval is 0%, so the headline cannot answer whether Tier 1 generalises: the
+narration parser finds no UTR, no bank edge is created, and **Tier 1 never runs at all**. A measure
+that linkage can mask is not a measure of the arithmetic. So `closure_report` compares
+`sum(settled payment amounts)` against the settlement's *own reported* `amount`, using no bank
+statement and no ground truth — two independently derived views (D-003), so a real cross-check.
+
+Result: **100% closure on both seeds.** Tier 1's rules hold on a world they were not tuned against.
+
+And the honest limit, as a number rather than a caveat: **~49% of explained money is schema-derived**
+— typed from `type` and `dispute_id`, fields the *gateway* asserts, which would read identically from
+a real Razorpay report. That half is not circular. **~51% is contract-derived** — reserve 500 bps,
+per-dispute fee Rs 1,500, instant fee 25 bps — constants we also generated with. That half *is*
+circular in D-015's sense: it shows the rules apply to unseen **instances**, not that they would hold
+for a merchant on a different **contract**.
+
+**The defensible one-line claim is therefore: Tier 1 generalises across worlds, not across contracts.**
+Anything stronger would be overclaiming, and the split is published so a reviewer can check the
+arithmetic of that sentence themselves.
+
+**4. Holding "no tolerance" found a real bug rather than costing us one.**
+The reserve is identified as the adjustment debit *exactly* equal to `round_half_up(credits x
+500bps)`. That matched **0 of 22** at first. The tempting fixes were both anti-patterns — read
+`description` (fuzzy matching, and circular since we wrote the string) or accept a tolerance (an
+arithmetic proof downgraded to a score). The generator was wrong: it withheld the reserve *before*
+the fee injection that changes the credits it is a percentage of. 22 of 22 after the fix (F-010).
+
+**5. The exception queue was showing 20 phantom breaks.**
+Tier 0 raises `AMOUNT_VARIANCE_UNEXPLAINED` on every edge it cannot close; Tier 1 then closed them,
+and the queue still carried Tier 0's view. An exception is a statement about the **final** state of
+the graph. Supersession is now applied in the pipeline and recorded in the audit log, so the
+intermediate view stays reconstructible without being shown to an analyst as a break.
+
+**6. The false-clear denominator grew, and the number held at zero.**
+At Inc 1, 83 dev breaks were out-of-remit — nothing had been built that could see them. At Tier 1
+**every declared class is in remit**, so the in-remit denominator is now the whole break population
+(192 dev, 184 eval) and it is still 0.00%. That is a materially stronger statement than Increment 1
+could make: there is no longer anywhere for a miss to hide.
+
+**7. Clean-clone time is noisy and the gate has room.**
+65 s tonight against 27 s measured on 31 Aug, same commit shape — venv 19.3 s vs 6.9 s and pip 43 s
+vs 18.6 s. Machine load, not the code: record count is unchanged and the demo itself is 2.4 s. The
+gate is 300 s, so the margin absorbs it, but the honest figure to quote is a range rather than the
+best run.
+
+### Time
+
+**9 of 13 days elapsed (69%).** Engine work stops **03 Sep** — two engine days left after tonight.
+
+### Next
+
+**Increment 3 — the LLM confined to narration parsing.** The measured case for it is now unusually
+sharp: Tier 1 closes 100% of the gaps it is given, and the *only* thing standing between the
+held-out seed and the same 83% explanation rate is that the deterministic parser scores **0 of 22**
+on settlement narrations it has never seen. The LLM has exactly one job, it is the job it is best
+at, and the ablation number for "without it" is already published.

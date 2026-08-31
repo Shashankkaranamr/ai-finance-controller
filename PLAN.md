@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| **Current increment** | 2 — Tier 1 decomposition **[OPEN 01 Sep]** · pivot decided: ACCEPT (D-016) |
+| **Current increment** | 2 — Tier 1 **[CLOSED 01 Sep]** · next: Increment 3, LLM narration only |
 | **Deadline** | 05 Sep 2026 — **confirmed with user** (not published on razorpay.com/buildathon) |
 | **Today** | 31 Aug 2026 |
 | **Elapsed / remaining** | 9 of 13 days elapsed (69%) · **4 days remain** · engine work stops 03 Sep · scope cut at the Inc 1 gate |
@@ -256,7 +256,7 @@ scenario · any UI · ablation table · `ARCHITECTURE.md`.
 
 ---
 
-## INCREMENT 2 — Tier 1 arithmetic variance decomposition  **[OPEN 01 Sep 2026]**
+## INCREMENT 2 — Tier 1 arithmetic variance decomposition  **[CLOSED 01 Sep 2026]**
 
 **Goal:** Close the residual. Type every remaining component of the gross-to-cash gap from the
 report's own fields and the contracted rate card, so a settlement reaches `EXPLAINED` with
@@ -687,3 +687,45 @@ controller could run against a real report.
 **What it rules out:** Any keyword or regex classification of adjustment lines. `notes` may appear in
 an exception's *evidence* for a human to read; it may never enter a resolver's decision.
 **Supersedes:** —
+
+### D-018 · Increment 2 · 2026-09-01 · Tier 1 is measured by decomposition closure, not explanation rate
+**Decision:** Add `closure_report`, which asks whether the gross-to-net gap can be typed using the
+settlement report alone — no bank statement, no narration, no ground truth — and publish it per seed
+alongside the headline.
+**Why:** Explanation rate on the held-out seed is 0%, and not for any arithmetic reason: the parser
+finds no UTR, no bank edge is created, and Tier 1 never runs. A metric that linkage can mask cannot
+answer whether the decomposition generalises, which was this gate's whole question. Closure compares
+two independently derived views (line items vs the settlement entity's own `amount`, D-003), so it is
+a real cross-check rather than a restatement. Measured: **100% on both seeds.**
+**What it rules out:** Reporting the eval explanation rate of 0% as evidence about Tier 1. It is
+evidence about narration parsing, and the two must not be conflated in the README or the video.
+**Supersedes:** —
+**Made autonomously overnight; open for review.**
+
+### D-019 · Increment 2 · 2026-09-01 · "Generalises across worlds, not across contracts"
+**Decision:** The claim we will defend about Tier 1 is exactly that sentence, backed by the published
+schema/contract split: ~49% of explained money is typed from documented Sec 3.1 fields the gateway
+asserts (`type`, `dispute_id`) and is not circular; ~51% is derived from rate-card constants we also
+generated with and is circular in D-015's sense.
+**Why:** The eval seed is a different world drawn from the *same* rate card, so 100% closure there
+demonstrates the rules apply to unseen instances — not that they would hold for a merchant on a
+different contract. Stating the stronger claim would be overclaiming, and a panel checking the
+generator would find it in minutes.
+**What it rules out:** Any "validated on held-out data" phrasing that does not carry the split. The
+remaining circularity would be genuinely broken by a third seed generated with a DIFFERENT rate card,
+where Tier 1 should report mismatches rather than closures — logged as the top candidate on the cut
+list rather than built tonight, because it is new scope at 69% of the calendar.
+**Supersedes:** —
+**Made autonomously overnight; open for review.**
+
+### D-020 · Increment 2 · 2026-09-01 · An exception describes the final state of the graph
+**Decision:** The pipeline drops exceptions whose subject edge ended `EXPLAINED`, recording each
+supersession in the audit log.
+**Why:** Tier 0 raises `AMOUNT_VARIANCE_UNEXPLAINED` on every edge it cannot close, and Tier 1 then
+closed 20 of them on dev. Without this the queue showed an analyst 20 phantom breaks the system had
+already explained — inflating the exception count, which Sec 6 names as the thing that understates
+the agent. The audit log keeps the intermediate view reconstructible.
+**What it rules out:** Tiers appending to a shared queue as if it were a log. The queue is a
+statement about now; the audit log is the history.
+**Supersedes:** —
+**Made autonomously overnight; open for review.**
