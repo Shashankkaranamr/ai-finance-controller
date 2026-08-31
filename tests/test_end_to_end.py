@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import json
 
-from recon.domain.graph import BUILT_TIER, EdgeKind, EdgeStatus, ExceptionType
+from recon.domain.graph import (BUILT_TIER, ComponentBasis, ComponentType,
+                                EdgeKind, EdgeStatus, ExceptionType)
 from recon.domain.truth import GroundTruth
 from recon.report.exceptions import SUBJECT_UNIT
 
@@ -81,15 +82,21 @@ def test_the_ledger_posts_nothing_it_cannot_fully_explain(result):
     not a defect: an accounting system that posts a half-understood entry is worse
     than one that posts none and raises an exception.
 
-    Expected to change when Tier 1 lands. It should change to a non-zero count,
-    never to a relaxed assertion.
+    Tier 1 has now landed, so the count is non-zero -- as the Increment 1 version
+    of this test said it must become, rather than being relaxed. The invariant
+    itself is unchanged and is the one that matters: entries are posted for
+    exactly the fully explained settlements, never for a partially understood one.
     """
     explained = [e for e in result.edges
                  if e.kind is EdgeKind.BANK_TO_SETTLEMENT
                  and e.status is EdgeStatus.EXPLAINED]
     assert len(result.journal) == len(explained)
-    assert BUILT_TIER == 0 and not explained, (
-        "Tier 1 has landed; update this test to assert the posted entries")
+    assert explained, "Tier 1 is wired in; something should now be explainable"
+
+    # And every posted entry balances by construction, because an edge is only
+    # EXPLAINED when gross - cash - sum(components) == 0.
+    for entry in result.journal:
+        assert entry.balances, f"unbalanced entry {entry.entry_id}"
 
 
 # --- gate 5: exactly one typed exception, with evidence ----------------------
@@ -154,9 +161,12 @@ def test_no_false_clears_within_the_built_tier_remit(result):
     metrics = result.metrics
     assert metrics.false_clear_in_remit.numerator == 0, (
         "a break inside the built tier's remit was silently passed")
-    # And the split must be real: out-of-remit breaks exist, so this does not pass
-    # merely because every class happens to be in remit.
-    assert metrics.false_clear_out_of_remit.denominator > 0
+    # At BUILT_TIER 1 every declared class is in remit, so the in-remit
+    # denominator must now be the WHOLE break population. That is a stronger
+    # statement than Increment 1 could make, not a weaker one: there is no longer
+    # anywhere for a miss to hide.
+    assert metrics.false_clear_in_remit.denominator == metrics.false_clear_rate.denominator
+    assert metrics.false_clear_out_of_remit.numerator == 0
 
 
 def test_every_out_of_remit_miss_names_a_tier_we_have_not_built(result, generated):
@@ -245,12 +255,28 @@ def test_bank_edges_carry_a_typed_decomposition_that_nets_to_zero(result):
             assert edge.decomposition is not None
             assert edge.decomposition.residual == 0
             kinds = {c.kind.value for c in edge.decomposition.components}
-            assert kinds == {"mdr", "gst_on_mdr"}
+            # Tier 0 contributes MDR and GST from the reported fee and tax; Tier 1
+            # adds whichever of the deduction stack this settlement actually
+            # carries. Pinning the exact set would just restate the fixture.
+            assert {"mdr", "gst_on_mdr"} <= kinds
+            assert kinds <= {c.value for c in ComponentType}
+            # Every component must declare how it was derived -- the circularity axis.
+            for component in edge.decomposition.components:
+                assert component.basis in ComponentBasis
             for component in edge.decomposition.components:
                 assert component.rule_version, "a component without a rule version is unauditable"
 
 
 def test_every_edge_records_the_tier_that_resolved_it(result):
+    """Tier is an attribute of an EDGE, so the ablation is a group-by (invariant 5)."""
     for edge in result.edges:
-        assert edge.tier.name == "T0_DETERMINISTIC"
+        assert edge.tier.value <= BUILT_TIER
         assert 0 <= edge.confidence <= 100
+
+    # The ablation falls out by construction: bank edges that reached EXPLAINED did
+    # so at Tier 1, and nothing else could have closed them.
+    explained_bank = [e for e in result.edges
+                      if e.kind is EdgeKind.BANK_TO_SETTLEMENT
+                      and e.status is EdgeStatus.EXPLAINED]
+    assert explained_bank
+    assert all(e.tier.name == "T1_ARITHMETIC" for e in explained_bank)

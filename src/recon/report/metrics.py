@@ -75,9 +75,11 @@ class Metrics:
     exception_typing_accuracy: Rate
     intrinsic_clean_rate: Rate
     narration_parse_rate: Rate
+    decomposition_closure: Rate
     residual_total: Paise = Paise(0)
     residual_by_component: dict[str, int] = field(default_factory=dict)
     injected_by_class: dict[str, int] = field(default_factory=dict)
+    explained_by_basis: dict[str, int] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict:
@@ -112,6 +114,21 @@ class Metrics:
             # What Tier 0 could not explain, bucketed by the component that TRULY
             # accounts for it. The Increment 2 input: mechanical and typeable, or
             # scattered and ambiguous?
+            # Can Tier 1 type the gross-to-net gap with NO linkage involved?
+            # Separated out because on the held-out seed the narration parser finds
+            # no UTR, so no bank edge exists and explanation rate is 0% for reasons
+            # that have nothing to do with the arithmetic. Without this, Tier 1
+            # would be unmeasurable on exactly the data that matters most.
+            #
+            # `explained_by_basis` is the circularity split: SCHEMA money is typed
+            # from documented Sec 3.1 fields the gateway asserts and would read the
+            # same from a real report; CONTRACT money is derived from a rate-card
+            # constant we also generated with, so it is partly circular. Published
+            # so the limit of the eval result is a number, not a caveat in prose.
+            "decomposition": {
+                "closure": self.decomposition_closure.to_json(),
+                "explained_by_basis": dict(sorted(self.explained_by_basis.items())),
+            },
             "residual_distribution": {
                 "residual_total_paise": int(self.residual_total),
                 "by_component": dict(sorted(self.residual_by_component.items())),
@@ -151,7 +168,20 @@ class Metrics:
             "DATA REALISM (from ground truth, no resolver involved)",
             "  " + self.intrinsic_clean_rate.line(),
             "  " + self.narration_parse_rate.line(),
+            "",
+            "TIER 1 DECOMPOSITION (no linkage, no ground truth)",
+            "  " + self.decomposition_closure.line(),
         ]
+        if self.explained_by_basis:
+            total = max(1, sum(self.explained_by_basis.values()))
+            for basis, amount in sorted(self.explained_by_basis.items()):
+                label = ("typed from documented schema fields" if basis == "schema"
+                         else "typed from contracted rate constants")
+                lines.append(f"  {label:<44} {format_bps(ratio_bps(amount, total)):>8}"
+                             f"  {format_inr(Paise(amount))}")
+            lines.append("  " + "contract-derived money is partly circular: the eval seed "
+                                "shares our rate card")
+
         if self.residual_by_component:
             lines += [
                 "",
@@ -272,6 +302,16 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
     narration_parse_rate = Rate(parsed, len(repo.bank),
                                 "narration parse rate (UTR extracted by regex)")
 
+    # Tier 1's arithmetic, isolated from linkage. Imported here rather than at
+    # module scope to keep the report layer from depending on a resolver at import
+    # time -- the dependency is real but it is a measurement, not a pipeline step.
+    from ..resolve.tier1 import closure_report
+
+    closed, total_settlements, explained_by_basis = closure_report(repo)
+    decomposition_closure = Rate(
+        closed, total_settlements,
+        "decomposition closure (gross->net gap fully typed)")
+
     # --- what the built tier could not explain, by its TRUE cause -------------
     # Tier 0 types MDR and GST from reported values, so its residual on a
     # settlement is exactly the sum of every OTHER true component. Bucketing it
@@ -330,6 +370,8 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         exception_typing_accuracy=exception_typing_accuracy,
         intrinsic_clean_rate=intrinsic_clean_rate,
         narration_parse_rate=narration_parse_rate,
+        decomposition_closure=decomposition_closure,
+        explained_by_basis=explained_by_basis,
         residual_total=Paise(residual_total),
         residual_by_component=residual_by_component,
         injected_by_class=injected_by_class,

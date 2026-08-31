@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..audit.log import AuditLog, run_id_for
-from ..domain.graph import ReconEdge
+from ..domain.graph import EdgeStatus, ReconEdge
 from ..domain.identities import RULE_VERSION
 from ..domain.truth import GroundTruth
 from ..ingest.load import Repository, load_all
@@ -22,7 +22,7 @@ from ..llm.client import Adjudicator, LLMStats, NullAdjudicator
 from ..money import Paise
 from ..report import exceptions as queue
 from ..report import metrics as report_metrics
-from . import tier0
+from . import tier0, tier1
 
 SOURCE_FILES = ("books.jsonl", "settlement_lines.jsonl", "settlements.jsonl", "bank.jsonl")
 
@@ -64,8 +64,28 @@ def run(data_dir: Path, out_dir: Path,
 
     edges, exception_records = tier0.resolve(repo, audit)
 
-    # Increment 0 is rules-only by design, so every run is already a degraded-mode
-    # run. Proving the degraded path on day one beats proving it on demo day.
+    # Tier 1 takes Tier 0's MATCHED bank edges and types what remains against the
+    # contracted rate card. It returns new edges rather than mutating: the audit
+    # log carries the transition, so the graph never holds two versions of a truth.
+    edges, tier1_exceptions = tier1.resolve(repo, edges, audit)
+    exception_records.extend(tier1_exceptions)
+
+    # An exception is a statement about the FINAL state of the graph, not about
+    # what some tier believed on the way there. Tier 0 raises
+    # AMOUNT_VARIANCE_UNEXPLAINED on every edge it cannot close; Tier 1 then closes
+    # most of them, and without this the queue would show an analyst 20 phantom
+    # breaks that the system had in fact already explained. Supersession is
+    # recorded in the audit log so the intermediate view is still reconstructible.
+    explained_refs = {e.ref for e in edges if e.status is EdgeStatus.EXPLAINED}
+    superseded = [r for r in exception_records
+                  if r.subject_kind == queue.SUBJECT_EDGE and r.subject_id in explained_refs]
+    for record in superseded:
+        audit.record("exception_superseded", code=record.code,
+                     subject=record.subject_id, by_tier=1)
+    exception_records = [r for r in exception_records if r not in superseded]
+
+    # Still rules-only by design, so every run is already a degraded-mode run.
+    # Proving the degraded path on day one beats proving it on demo day.
     llm = LLMStats(
         available=adjudicator.available,
         calls_attempted=0,

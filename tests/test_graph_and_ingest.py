@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from recon.domain.graph import (EDGE_SPECS, Decomposition, EdgeKind, EdgeStatus, Evidence,
+from recon.domain.graph import (ComponentBasis, EDGE_SPECS, Decomposition, EdgeKind, EdgeStatus, Evidence,
                                 ExceptionType, ReconEdge, Tier, VarianceComponent,
                                 ComponentType)
 from recon.ingest.load import load_all
@@ -59,8 +59,10 @@ def test_confidence_is_bounded():
 def test_residual_accounts_for_every_component():
     decomposition = Decomposition(
         expected=Paise(100_000), actual=Paise(97_640),
-        components=(VarianceComponent(ComponentType.MDR, Paise(2_000), "v1"),
-                    VarianceComponent(ComponentType.GST_ON_MDR, Paise(360), "v1")))
+        components=(VarianceComponent(ComponentType.MDR, Paise(2_000), "v1",
+                                      ComponentBasis.SCHEMA),
+                    VarianceComponent(ComponentType.GST_ON_MDR, Paise(360), "v1",
+                                      ComponentBasis.SCHEMA)))
     assert int(decomposition.residual) == 0
     assert decomposition.is_fully_explained
 
@@ -68,7 +70,8 @@ def test_residual_accounts_for_every_component():
 def test_residual_is_nonzero_when_a_component_is_missing():
     decomposition = Decomposition(
         expected=Paise(100_000), actual=Paise(97_640),
-        components=(VarianceComponent(ComponentType.MDR, Paise(2_000), "v1"),))
+        components=(VarianceComponent(ComponentType.MDR, Paise(2_000), "v1",
+                                      ComponentBasis.SCHEMA),))
     assert int(decomposition.residual) == 360
     assert not decomposition.is_fully_explained
 

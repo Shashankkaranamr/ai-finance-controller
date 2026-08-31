@@ -322,21 +322,27 @@ def test_playbook_covers_every_exception_type():
         assert action.strip() and owner.strip(), exception.code
 
 
-def test_tier0_covers_its_declared_remit():
-    """Every class marked detectable_at == 0 must actually be raised by tier0.py.
+def test_each_tier_covers_the_remit_it_declares():
+    """A class marked `detectable_at == N` must actually be raised by tier N.
 
     Without this, `detectable_at` would be an aspiration rather than a contract,
     and the false-clear split would quietly relabel real misses as out-of-remit --
-    which is exactly the self-deception the split exists to prevent.
+    exactly the self-deception the split exists to prevent. Checking the SPECIFIC
+    tier, not just "somewhere in the resolver", also stops a class drifting to a
+    higher tier than it claims and inflating the earlier tier's apparent reach.
     """
     import inspect
 
-    source = inspect.getsource(tier0)
-    in_remit = [e for e in ExceptionType if e.detectable_at <= BUILT_TIER]
-    unimplemented = [e.code for e in in_remit
-                     if f"ExceptionType.{e.name}" not in source]
-    assert not unimplemented, (
-        f"declared detectable at tier {BUILT_TIER} but never raised: {unimplemented}")
+    from recon.resolve import tier1
+
+    sources = {0: inspect.getsource(tier0), 1: inspect.getsource(tier1)}
+    wrong = []
+    for exception in ExceptionType:
+        if exception.detectable_at > BUILT_TIER:
+            continue
+        if f"ExceptionType.{exception.name}" not in sources[exception.detectable_at]:
+            wrong.append(f"{exception.code} (declared tier {exception.detectable_at})")
+    assert not wrong, f"declared detectable but never raised by that tier: {wrong}"
 
 
 def test_built_tier_matches_the_tiers_actually_wired_in():
@@ -344,8 +350,10 @@ def test_built_tier_matches_the_tiers_actually_wired_in():
     split, so an optimistic value would hide real defects."""
     from recon.resolve import pipeline
 
-    assert BUILT_TIER == 0
-    assert "tier1" not in inspect_source(pipeline)
+    source = inspect_source(pipeline)
+    assert BUILT_TIER == 1
+    assert "tier1.resolve" in source, "BUILT_TIER claims Tier 1 but it is not wired in"
+    assert "tier2" not in source, "Tier 2 is wired in but BUILT_TIER has not moved"
 
 
 def inspect_source(module) -> str:

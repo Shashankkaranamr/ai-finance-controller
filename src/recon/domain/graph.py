@@ -92,7 +92,7 @@ class Tier(Enum):
 # false-clear split so that "we did not catch it" can be separated into "we
 # silently passed it" and "no resolver for that exists yet". Bump it in the same
 # commit that lands a tier -- never ahead of one.
-BUILT_TIER = 0
+BUILT_TIER = 1
 
 
 class EdgeStatus(Enum):
@@ -219,15 +219,42 @@ class ComponentType(Enum):
     # Still absent, and deliberately: TDS_194O (out by persona), FX_DIFF (cut).
 
 
+class ComponentBasis(Enum):
+    """HOW a component was typed. The axis the circularity gate turns on.
+
+    Increment 1 established that our residuals are 100% typed by construction
+    (D-015), because the world is simulated from the same components that explain
+    it. That circularity resurfaces at Tier 1, and this enum is what makes it
+    measurable rather than merely confessable:
+
+      SCHEMA   -- read off a documented Sec 3.1 field the GATEWAY asserts
+                  (`type == refund`, `dispute_id` present). We would read the
+                  identical field from a real report, so this is not circular.
+      CONTRACT -- derived from a rate-card constant (reserve rate, per-dispute
+                  fee, instant fee rate). A real controller holds these too, but
+                  we also generated with them, so it is partly circular and the
+                  metrics say how much.
+
+    There is deliberately no NARRATIVE member. Typing a line from `description` or
+    `notes` -- prose we wrote -- is banned outright (D-017): it is fully circular
+    AND it is the fuzzy string matching Sec 9 names as most likely to sink this.
+    Its absence from this enum is the point; there is no value to record it as.
+    """
+
+    SCHEMA = "schema"
+    CONTRACT = "contract"
+
+
 @dataclass(frozen=True, slots=True)
 class VarianceComponent:
     kind: ComponentType
     amount: Paise
     rule_version: str   # which slab/rule produced it -- reproducibility (Sec 4.1)
+    basis: ComponentBasis
 
     def to_json(self) -> dict:
         return {"kind": self.kind.value, "amount": int(self.amount),
-                "rule_version": self.rule_version}
+                "rule_version": self.rule_version, "basis": self.basis.value}
 
 
 @dataclass(frozen=True, slots=True)

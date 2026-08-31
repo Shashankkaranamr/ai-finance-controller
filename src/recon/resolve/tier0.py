@@ -25,8 +25,9 @@ and shows up in the metrics as out-of-remit rather than as a false clear.
 from __future__ import annotations
 
 from ..audit.log import AuditLog
-from ..domain.graph import (ComponentType, Decomposition, EdgeKind, EdgeStatus, Evidence,
-                            ExceptionType, ReconEdge, Tier, VarianceComponent)
+from ..domain.graph import (ComponentBasis, ComponentType, Decomposition, EdgeKind,
+                            EdgeStatus, Evidence, ExceptionType, ReconEdge, Tier,
+                            VarianceComponent)
 from ..domain.identities import (RULE_VERSION, bank_tie_out_holds, expected_gst,
                                  gst_on_mdr_holds, rollup)
 from ..generate.narration import parse_utr
@@ -446,8 +447,13 @@ def _resolve_bank_credits(repo, members_by_settlement, settlement_by_utr,
             expected=gross,
             actual=Paise(credit.amount),
             components=(
-                VarianceComponent(ComponentType.MDR, mdr, RULE_VERSION),
-                VarianceComponent(ComponentType.GST_ON_MDR, gst, RULE_VERSION),
+                # Both read off the reported `fee` and `tax` -- documented Sec 3.1
+                # fields, so SCHEMA. Tier 0 has no second opinion to compare them
+                # against; that is Tier 1's job.
+                VarianceComponent(ComponentType.MDR, mdr, RULE_VERSION,
+                                  ComponentBasis.SCHEMA),
+                VarianceComponent(ComponentType.GST_ON_MDR, gst, RULE_VERSION,
+                                  ComponentBasis.SCHEMA),
             ),
         )
 

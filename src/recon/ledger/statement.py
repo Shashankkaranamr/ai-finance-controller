@@ -118,7 +118,7 @@ class ReconStatement:
             f"| {'+ Gross sales':<44} | books | {format_inr(self.gross_sales):>20} |",
             f"| {'- Settlements received':<44} | bank | "
             f"{format_inr(self.settlements_received):>20} |",
-            f"| {'- Explained variance (MDR + GST)':<44} | resolver | "
+            f"| {'- Explained variance (full deduction stack)':<44} | resolver | "
             f"{format_inr(self.explained_variance):>20} |",
             f"| {'- Exceptions, at gross':<44} | queue | "
             f"{format_inr(self.exceptions_gross):>20} |",
@@ -138,7 +138,8 @@ class ReconStatement:
             f"The queue prioritises by cash at risk ({format_inr(self.exceptions_cash_at_risk)}), "
             f"net of fees the gateway already deducted. This statement uses gross "
             f"({format_inr(self.exceptions_gross)}) because gross is what the receivable "
-            "was raised at. The difference is the MDR and GST on the unsettled cycle.",
+            "was raised at. The difference is the whole deduction stack on the "
+            "unsettled cycles -- fees, GST, reserve, refunds and disputes.",
         ]
         return "\n".join(lines) + "\n"
 
@@ -153,20 +154,28 @@ def build(edges: list[ReconEdge], repo, opening_receivable: Paise = Paise(0)) ->
 
     gross_sales = sum(b.gross_amount for b in repo.books.values())
     settlements_received = sum(int(e.decomposition.actual) for e in explained_bank)
+
+    # EVERY typed component, not just MDR and GST. Tier 1 types seven more, and
+    # summing a subset here is what stopped the statement footing the moment it
+    # landed. The identity below is exactly what makes this a cross-source check:
+    # cash comes from the bank, variance from the resolver, gross from the
+    # settlement report, and they have to agree without being told to.
     explained_variance = sum(
         int(c.amount)
         for e in explained_bank
-        for c in e.decomposition.components
-        if c.kind in (ComponentType.MDR, ComponentType.GST_ON_MDR))
+        for c in e.decomposition.components)
 
-    relieved_gross = sum(
-        sum(m.amount for m in members_by_settlement.get(sid, []))
-        for sid in sorted(explained_ids))
+    # Settled PAYMENT lines only -- the same population Tier 0 and Tier 1 call
+    # `expected`. Summing every line type would double-count a refund, which is
+    # already a deduction inside the variance.
+    def settled_gross(settlement_id: str) -> int:
+        return sum(m.amount for m in members_by_settlement.get(settlement_id, [])
+                   if m.is_settled_payment)
+
+    relieved_gross = sum(settled_gross(sid) for sid in sorted(explained_ids))
 
     unexplained_ids = sorted(set(repo.settlements) - explained_ids)
-    exceptions_gross = sum(
-        sum(m.amount for m in members_by_settlement.get(sid, []))
-        for sid in unexplained_ids)
+    exceptions_gross = sum(settled_gross(sid) for sid in unexplained_ids)
     exceptions_cash = sum(repo.settlements[sid].amount for sid in unexplained_ids)
 
     # Orders that are in no settlement at all -- genuinely still in transit.
@@ -183,14 +192,41 @@ def build(edges: list[ReconEdge], repo, opening_receivable: Paise = Paise(0)) ->
     )
 
 
+# Where each typed component lands in the ledger. The two that matter:
+#
+#   GST on MDR is its OWN account, not folded into MDR Expense, because it is
+#   reclaimable as Input Tax Credit -- buried inside an expense the merchant
+#   loses the claim. That is the business reason `tax` exists in the Sec 3.1
+#   schema at all.
+#
+#   Rolling reserve is a RECEIVABLE, not an expense (BRIEF Sec 3.3: "a receivable
+#   from the gateway, not settled cash"). Withholding debits the asset, releasing
+#   credits it, and both post to the same account -- so the reserve ledger nets
+#   itself out over the hold period instead of quietly becoming a cost.
+COMPONENT_ACCOUNTS: dict[ComponentType, str] = {
+    ComponentType.MDR: "MDR Expense",
+    ComponentType.GST_ON_MDR: "GST Input Credit",
+    ComponentType.REFUND_OFFSET: "Refunds",
+    ComponentType.TRANSFER_OUT: "Vendor Payouts",
+    ComponentType.CHARGEBACK_REVERSAL: "Chargeback Losses",
+    ComponentType.CHARGEBACK_FEE: "Chargeback Fees",
+    ComponentType.ROLLING_RESERVE: "Rolling Reserve Receivable",
+    ComponentType.RESERVE_RELEASE: "Rolling Reserve Receivable",
+    ComponentType.INSTANT_SETTLEMENT_FEE: "Settlement Fees",
+}
+
+
 def journal_entries(edges: list[ReconEdge], repo) -> list[JournalEntry]:
     """One balanced entry per fully explained settlement.
 
-    Dr Bank / Dr MDR Expense / Dr GST Input Credit / Cr Trade Receivable.
+    Dr Bank / Dr <each typed component> / Cr Trade Receivable.
 
-    GST on MDR is its own line because it is reclaimable as Input Tax Credit --
-    buried inside MDR expense the merchant loses the claim. That is the business
-    reason the `tax` field exists in the settlement schema at all.
+    It balances by construction rather than by arrangement: an edge is EXPLAINED
+    only when `gross - cash - sum(components) == 0`, so debits (cash plus every
+    component) equal the credit (gross) identically. Nothing is posted for a
+    settlement that is not fully explained -- an accounting system that posts a
+    half-understood entry is worse than one that posts none and raises an
+    exception.
     """
     members_by_settlement = repo.lines_by_settlement()
     entries: list[JournalEntry] = []
@@ -201,21 +237,29 @@ def journal_entries(edges: list[ReconEdge], repo) -> list[JournalEntry]:
         key=lambda e: e.dst_uid)
 
     for edge in explained:
-        components = {c.kind: int(c.amount) for c in edge.decomposition.components}
         cash = int(edge.decomposition.actual)
-        mdr = components.get(ComponentType.MDR, 0)
-        gst = components.get(ComponentType.GST_ON_MDR, 0)
-        gross = sum(m.amount for m in members_by_settlement.get(edge.dst_uid, []))
+        gross = sum(m.amount for m in members_by_settlement.get(edge.dst_uid, [])
+                    if m.is_settled_payment)
+
+        # Net by account first: reserve withheld and reserve released share one
+        # account and must not appear as two opposing lines on the same entry.
+        netted: dict[str, int] = {}
+        for component in edge.decomposition.components:
+            account = COMPONENT_ACCOUNTS[component.kind]
+            netted[account] = netted.get(account, 0) + int(component.amount)
+
+        lines = [JournalLine("Bank", Paise(cash), Paise(0))]
+        for account, amount in sorted(netted.items()):
+            if amount == 0:
+                continue
+            lines.append(JournalLine(account, Paise(max(amount, 0)),
+                                     Paise(max(-amount, 0))))
+        lines.append(JournalLine("Trade Receivable", Paise(0), Paise(gross)))
 
         entries.append(JournalEntry(
             entry_id=f"je_{edge.dst_uid}",
             narrative=f"Settlement {edge.dst_uid} received via bank credit {edge.src_uid}",
-            lines=(
-                JournalLine("Bank", Paise(cash), Paise(0)),
-                JournalLine("MDR Expense", Paise(mdr), Paise(0)),
-                JournalLine("GST Input Credit", Paise(gst), Paise(0)),
-                JournalLine("Trade Receivable", Paise(0), Paise(gross)),
-            ),
+            lines=tuple(lines),
         ))
 
     return entries
