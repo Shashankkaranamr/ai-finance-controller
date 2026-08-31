@@ -45,6 +45,38 @@ the demo itself is 1 s). Verified on Windows with no `uv` and no `make`, and wit
 no network access needed after install. The decision to hold dependencies at
 pydantic + pytest is what buys this margin.
 
+**Re-measured 31 Aug 2026 — fresh venv, at `C:\dev`, off OneDrive: 27 s.** The 57 s above stands
+as the Increment 0 gate number and is not restated. This is the number a reviewer on this
+machine hits today, measured phase by phase against the same `< 300 s` gate:
+
+| Phase | Warm pip cache | Cold pip cache (`--no-cache-dir`) |
+|---|---|---|
+| `git clone` (local path) | 0.2 s | 0.2 s |
+| `py -3.13 -m venv .venv` | 6.9 s | 6.9 s |
+| `pip install -e ".[dev]"` | 18.6 s | 20.7 s |
+| `python -m recon demo` | 0.8 s | 0.8 s |
+| **Total** | **26.6 s** | **28.6 s** |
+
+`git clone` from GitHub rather than from the local path measured separately at **2.7 s**, so the
+end-to-end number for a reviewer starting from the public remote is **≈31 s**. Gate: < 300 s.
+
+Three things this measurement establishes, beyond the headline:
+
+**Determinism now holds across a clone boundary.** The fresh clone's `metrics.json` hashes to
+sha256 `83f6c531…` — the same value recorded at the Increment 0 gate, from a different directory
+and a freshly created venv. Invariant 2 was previously verified
+only as two runs in one tree; it is now verified across the move *and* across a clean clone.
+
+**The pip cache is not what changed.** Cold and warm differ by 2.1 s, so the drop from 56 s of pip
+to ~19 s is not cache warmth. It is consistent with removing OneDrive's sync overhead from the many
+small file writes a venv plus editable install performs (D-008), but this is an *observation, not a
+proven cause*: the OneDrive path no longer exists, so the A/B cannot be run, and Windows filesystem
+cache warmth is an uncontrolled confounder. Recorded at that strength deliberately.
+
+**`eol=lf` behaves on Windows.** The fresh clone checks out `PLAN.md`, `graph.py` and
+`.gitattributes` LF-only, and `python -m recon demo` still exits 0 against them. The line-ending
+change costs nothing at run time.
+
 Statement: gross Rs 5,18,101.78 − cash Rs 4,33,079.04 − variance Rs 10,467.68 −
 exceptions Rs 74,555.06 = **Rs 0.00**. Journal: 5 entries, all balanced.
 
