@@ -80,6 +80,7 @@ class Metrics:
     decomposition_closure: Rate
     residual_total: Paise = Paise(0)
     residual_by_component: dict[str, int] = field(default_factory=dict)
+    linkage_precision_by_kind: dict[str, dict] = field(default_factory=dict)
     injected_by_class: dict[str, int] = field(default_factory=dict)
     false_alarms_by_code: dict[str, int] = field(default_factory=dict)
     explained_by_basis: dict[str, int] = field(default_factory=dict)
@@ -100,6 +101,13 @@ class Metrics:
             },
             "accuracy": {
                 "linkage_precision": self.linkage_precision.to_json(),
+                # PER GRAIN, because the aggregate is structurally insensitive.
+                # 3,388 of the dev edges are settlement->line and line->book on
+                # exact ids that cannot be wrong; the grain actually under attack
+                # by an adjudicator is at most 24 edges, 0.7% of the denominator.
+                # "Precision unmoved at 100.00%" is true either way, so the
+                # aggregate understates how sharp the fence test is (FIX-6).
+                "linkage_precision_by_kind": dict(sorted(self.linkage_precision_by_kind.items())),
                 "linkage_recall": self.linkage_recall.to_json(),
                 "exception_detection_recall": self.exception_detection_recall.to_json(),
                 "false_clear_rate": self.false_clear_rate.to_json(),
@@ -173,6 +181,11 @@ class Metrics:
             "",
             "ACCURACY vs ground truth",
             "  " + self.linkage_precision.line(),
+        ] + [
+            f"      {kind:<38} {format_bps(row['rate_bps']):>8}  "
+            f"({row['correct']}/{row['accepted']})"
+            for kind, row in sorted(self.linkage_precision_by_kind.items())
+        ] + [
             "  " + self.linkage_recall.line(),
             "  " + self.exception_detection_recall.line(),
             "  " + self.false_clear_rate.line(),
@@ -273,6 +286,19 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
 
     linkage_precision = Rate(len(correct), len(predicted),
                              "linkage precision (of what we matched)")
+
+    # The aggregate hides which grain is actually at risk: settlement->line and
+    # line->book join on ids that cannot be wrong, so they dominate the
+    # denominator and hold it near 100% no matter what happens at the bank grain.
+    linkage_precision_by_kind: dict[str, dict] = {}
+    for kind in sorted({key[0] for key in predicted}):
+        accepted_k = {key for key in predicted if key[0] == kind}
+        correct_k = accepted_k & truth_edges
+        linkage_precision_by_kind[kind] = {
+            "accepted": len(accepted_k),
+            "correct": len(correct_k),
+            "rate_bps": ratio_bps(len(correct_k), len(accepted_k)),
+        }
     linkage_recall = Rate(len(correct), len(truth_edges),
                           "linkage recall (of true links)")
 
@@ -453,6 +479,7 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         false_clear_out_of_remit=false_clear_out_of_remit,
         exception_typing_accuracy=exception_typing_accuracy,
         exception_queue_precision=exception_queue_precision,
+        linkage_precision_by_kind=linkage_precision_by_kind,
         false_alarms_by_code=false_alarms_by_code,
         intrinsic_clean_rate=intrinsic_clean_rate,
         narration_parse_rate=narration_parse_rate,

@@ -548,3 +548,25 @@ def test_declining_to_answer_is_not_counted_as_a_hallucination(generated_eval, t
     assert result.llm.blocked_hallucination == 0, "abstention counted as invention"
     assert result.llm.blocked_unverifiable > 0
     assert result.metrics.linkage_precision.bps == 10_000
+
+
+def test_precision_is_published_per_grain_so_the_fence_claim_is_sharp(generated_eval, tmp_path):
+    """FIX-6. "Precision unmoved at 100.00%" is true but structurally insensitive.
+
+    Most edges are settlement->line and line->book joins on ids that cannot be
+    wrong; they dominate the denominator and hold the aggregate near 100% whatever
+    happens at the bank grain — which is the only grain an adjudicator can touch.
+    A reviewer who works out the denominator reads the claim the other way.
+
+    Published per kind, the bank grain's own precision is the number that carries
+    the fence argument.
+    """
+    hostile = pipeline.run(generated_eval, tmp_path / "hostile",
+                           adjudicator=HostileAdjudicator())
+    by_kind = hostile.metrics.linkage_precision_by_kind
+
+    assert "bank_to_settlement" in by_kind
+    bank = by_kind["bank_to_settlement"]
+    assert bank["rate_bps"] == 10_000, "a hallucinated link reached the bank grain"
+    # The grain under attack must be a small denominator — that is the point.
+    assert bank["accepted"] < hostile.metrics.linkage_precision.denominator // 10
