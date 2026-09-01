@@ -21,6 +21,27 @@ No network, no API key, no `make`, no `uv`. The LLM is opt-in (`--llm`).
 
 ---
 
+## The whole system in one picture
+
+![Three sources fanning into the reconciliation edge graph, with tiers T0-T4 overlaid](docs/architecture.svg)
+
+Three sources on the left, the typed edge graph in the middle, the tiers on the right. The two things
+to take from it before reading further:
+
+**The fan.** Roughly seventy line items converge on one settlement, which ties to one lump bank
+credit. That is why row-to-row matching here is not merely inaccurate but **ill-posed** — there is no
+row on the bank side to match a line item against.
+
+**The colours are tiers, and they sit on edges rather than on rows.** The headline edge is linked by
+Tier 0, or by Tier 3 when the narration defeats the parser, and then explained by Tier 1. Sections 2
+and 3 are that sentence in detail.
+
+*(Vector, so it scales cleanly for the video's opening frame. Presentation is set with attributes
+rather than a stylesheet, because markdown sanitisers strip `<style>` and it would render as black
+boxes.)*
+
+---
+
 ## 1. The grain model — why not a pipeline over rows
 
 **The claim:** reconciliation here is a graph of typed edges between units drawn from three sources,

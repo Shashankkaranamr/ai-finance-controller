@@ -29,7 +29,10 @@ coverage always appear together (D-005). Never quote 62% without the range.
 >
 > Which is why row-to-row matching here isn't inaccurate. It's **ill-posed**.
 
-**On screen:** three sources side by side; one bank credit fanning out to ~70 line items.
+**On screen:** `docs/architecture.svg`, full frame. Hold on the left two thirds — the three
+source boxes and the fan of ~70 line items converging on one settlement, then one bank credit.
+The red callout lands exactly on the word *ill-posed*. Do not show the tier panel yet; it is the
+next block's visual.
 
 ---
 
@@ -45,7 +48,8 @@ coverage always appear together (D-005). Never quote 62% without the range.
 > **Tier 3 is the LLM, with one job:** read a UTR out of a narration no parser was written for. Never
 > picks between settlements, never touches an amount.
 
-**On screen:** the tier table; highlight the Tier 0 / Tier 1 boundary.
+**On screen:** same diagram, now pan right to the tier panel and the strip along the bottom —
+*T0 links it · T3 links it when the narration defeats the parser · T1 explains the money*.
 
 ---
 

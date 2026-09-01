@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" role="img" aria-labelledby="ttl dsc" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <title id="ttl">Three sources fanning into the reconciliation edge graph, with tiers T0-T4 overlaid</title>
+  <desc id="dsc">Books, the Razorpay settlement recon report and the bank statement feed four kinds of typed edge. Many settlement line items converge on one settlement, which ties to one lump bank credit, so there is no row on the bank side to match a line item against. Tier 0 joins on exact keys, Tier 1 explains the money against a contracted rate card, Tier 2 is cut, Tier 3 is the fenced LLM, Tier 4 is the analyst queue. Presentation is set with attributes rather than a stylesheet so it survives markdown sanitisers.</desc>
+
+  <rect width="1600" height="920" fill="#ffffff"/>
+
+  <text x="48" y="52" fill="#16181d" font-size="31" font-weight="700">Three sources that never agree — and the tiers that reconcile them</text>
+  <text x="48" y="80" fill="#5b6472" font-size="15">Reconciliation is a graph of typed edges, not a pipeline over rows. Tier is an attribute of an EDGE, which is what makes the ablation a group-by.</text>
+
+  <text x="48" y="132" fill="#5b6472" font-size="19" font-weight="700" letter-spacing="1.6">THREE SOURCES</text>
+
+  <rect x="48" y="150" width="272" height="118" rx="9" fill="#f4f5f7" stroke="#c9cfd8" stroke-width="1.5"/>
+  <text x="68" y="180" fill="#16181d" font-size="17" font-weight="650">Books / ERP</text>
+  <text x="68" y="206" fill="#5b6472" font-size="15">one row per order</text>
+  <text x="68" y="230" fill="#5b6472" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">order_id · gross_amount</text>
+  <text x="68" y="252" fill="#5b6472" font-size="13.5">knows nothing about fees or UTRs</text>
+
+  <rect x="48" y="330" width="272" height="150" rx="9" fill="#f4f5f7" stroke="#c9cfd8" stroke-width="1.5"/>
+  <text x="68" y="360" fill="#16181d" font-size="17" font-weight="650">Settlement recon report</text>
+  <text x="68" y="386" fill="#5b6472" font-size="15">many line items per settlement</text>
+  <text x="68" y="410" fill="#5b6472" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">payment · refund · transfer · adjustment</text>
+  <text x="68" y="434" fill="#5b6472" font-size="13.5">the only place the three ever meet —</text>
+  <text x="68" y="454" fill="#5b6472" font-size="13.5">and only via keys you have to work for</text>
+
+  <rect x="48" y="560" width="272" height="118" rx="9" fill="#f4f5f7" stroke="#c9cfd8" stroke-width="1.5"/>
+  <text x="68" y="590" fill="#16181d" font-size="17" font-weight="650">Bank statement</text>
+  <text x="68" y="616" fill="#5b6472" font-size="15">one lump credit per settlement</text>
+  <text x="68" y="640" fill="#5b6472" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">UTR, buried in free text</text>
+  <text x="68" y="662" fill="#5b6472" font-size="13.5">no order ids, no line items</text>
+
+  <path d="M320 209 H364 V193 H392" stroke="#c9cfd8" stroke-width="1.5" fill="none"/>
+  <path d="M320 388 H352 V300 H600" stroke="#c9cfd8" stroke-width="1.5" fill="none"/>
+  <path d="M320 420 H340 V468 H852" stroke="#c9cfd8" stroke-width="1.5" fill="none"/>
+  <path d="M320 619 H1000 V640 H1060" stroke="#c9cfd8" stroke-width="1.5" fill="none"/>
+
+  <text x="392" y="132" fill="#5b6472" font-size="19" font-weight="700" letter-spacing="1.6">THE EDGE GRAPH</text>
+
+  <text x="392" y="166" fill="#5b6472" font-size="13.5">book_entry</text>
+  <rect x="392" y="176" width="140" height="34" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="392" y="218" width="140" height="34" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="392" y="260" width="140" height="34" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <text x="412" y="198" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">order_a1b2…</text>
+  <text x="412" y="240" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">order_c3d4…</text>
+  <text x="412" y="282" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">order_e5f6…</text>
+  <text x="392" y="318" fill="#5b6472" font-size="13.5">1,549 orders</text>
+
+  <text x="600" y="166" fill="#5b6472" font-size="13.5">line_item</text>
+  <rect x="600" y="176" width="156" height="30" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="600" y="212" width="156" height="30" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="600" y="248" width="156" height="30" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="600" y="284" width="156" height="30" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="600" y="320" width="156" height="30" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <rect x="600" y="356" width="156" height="30" rx="6" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <text x="616" y="196" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">payment</text>
+  <text x="616" y="232" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">payment</text>
+  <text x="616" y="268" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">refund</text>
+  <text x="616" y="304" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">adjustment</text>
+  <text x="616" y="340" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">transfer</text>
+  <text x="616" y="376" fill="#16181d" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">payment</text>
+  <text x="600" y="408" fill="#5b6472" font-size="13.5">1,732 lines · ~70 per settlement</text>
+
+  <rect x="852" y="430" width="168" height="76" rx="9" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <text x="872" y="458" fill="#16181d" font-size="17" font-weight="650">settlement</text>
+  <text x="872" y="482" fill="#5b6472" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">setl_… · amount</text>
+  <text x="852" y="528" fill="#5b6472" font-size="13.5">22 settlements</text>
+
+  <rect x="1060" y="600" width="168" height="76" rx="9" fill="#ffffff" stroke="#aeb6c2" stroke-width="1.5"/>
+  <text x="1080" y="628" fill="#16181d" font-size="17" font-weight="650">bank_credit</text>
+  <text x="1080" y="652" fill="#5b6472" font-size="13.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">one lump · UTR</text>
+  <text x="1060" y="698" fill="#5b6472" font-size="13.5">24 credits</text>
+
+  <path d="M600 191 H566 V193 H532" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M600 227 H566 V235 H532" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M600 371 H556 V277 H532" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <text x="392" y="146" fill="#2563eb" font-size="13.5">LINE_TO_BOOK · 1:1</text>
+
+  <path d="M756 191 C812 191 806 430 852 452" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M756 227 C812 227 806 434 852 456" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M756 263 C812 263 806 440 852 460" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M756 299 C812 299 806 446 852 464" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M756 335 C812 335 806 452 852 472" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <path d="M756 371 C812 371 806 458 852 480" stroke="#2563eb" stroke-width="2" fill="none"/>
+  <text x="762" y="424" fill="#2563eb" font-size="13.5">SETTLEMENT_TO_LINE · 1:N</text>
+
+  <path d="M600 263 C558 263 558 191 596 191" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 4" fill="none"/>
+  <text x="392" y="352" fill="#2563eb" font-size="13.5">REFUND_TO_PAYMENT</text>
+  <text x="392" y="371" fill="#5b6472" font-size="13.5">1:1 · crosses cycles</text>
+
+  <path d="M1020 480 C1046 480 1040 588 1060 618" stroke="#059669" stroke-width="3.5" fill="none"/>
+  <text x="1036" y="556" fill="#059669" font-size="13.5">BANK_TO_SETTLEMENT · 1:1</text>
+
+  <rect x="836" y="196" width="392" height="150" rx="9" fill="#fef3f2" stroke="#f0b4ae" stroke-width="1.5"/>
+  <text x="856" y="228" fill="#b42318" font-size="17" font-weight="650">Why row-to-row matching is ill-posed</text>
+  <text x="856" y="258" fill="#16181d" font-size="15">~70 line items converge on one settlement,</text>
+  <text x="856" y="282" fill="#16181d" font-size="15">which ties to <tspan font-weight="700">one lump bank credit</tspan>.</text>
+  <text x="856" y="314" fill="#b42318" font-size="15">There is no row on the bank side to</text>
+  <text x="856" y="336" fill="#b42318" font-size="15">match a line item against.</text>
+
+  <rect x="392" y="726" width="836" height="120" rx="9" fill="#f0f7f4" stroke="#a7d3c2" stroke-width="1.5"/>
+  <text x="416" y="758" fill="#16181d" font-size="17" font-weight="650">The gap the edge has to explain</text>
+  <text x="416" y="792" fill="#16181d" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">gross − MDR − GST − rolling reserve − refund offsets − chargebacks − fees = cash</text>
+  <text x="416" y="822" fill="#5b6472" font-size="15">EXPLAINED only when that residual is exactly zero and every component is typed. Nothing posts to the ledger before then.</text>
+
+  <text x="1280" y="132" fill="#5b6472" font-size="19" font-weight="700" letter-spacing="1.6">TIERS</text>
+  <text x="1280" y="156" fill="#5b6472" font-size="13.5">how an edge gets resolved</text>
+
+  <rect x="1280" y="176" width="14" height="14" rx="3" fill="#2563eb"/>
+  <text x="1306" y="189" fill="#16181d" font-size="17" font-weight="650">T0 · deterministic</text>
+  <text x="1280" y="212" fill="#5b6472" font-size="13.5">exact-key joins, §3.2 identities</text>
+  <text x="1280" y="231" fill="#5b6472" font-size="13.5">over the values the report states</text>
+
+  <rect x="1280" y="264" width="14" height="14" rx="3" fill="#059669"/>
+  <text x="1306" y="277" fill="#16181d" font-size="17" font-weight="650">T1 · arithmetic</text>
+  <text x="1280" y="300" fill="#5b6472" font-size="13.5">types the deduction stack against</text>
+  <text x="1280" y="319" fill="#5b6472" font-size="13.5">a contracted rate card — the first</text>
+  <text x="1280" y="338" fill="#5b6472" font-size="13.5">independent second opinion</text>
+
+  <rect x="1280" y="372" width="14" height="14" rx="3" fill="#b6bcc6"/>
+  <text x="1306" y="385" fill="#7a8493" font-size="17" font-weight="650">T2 · candidate search</text>
+  <text x="1280" y="408" fill="#7a8493" font-size="13.5">CUT — the residual had zero</text>
+  <text x="1280" y="427" fill="#7a8493" font-size="13.5">scatter, so nothing to search</text>
+
+  <rect x="1280" y="460" width="14" height="14" rx="3" fill="#7c3aed"/>
+  <text x="1306" y="473" fill="#16181d" font-size="17" font-weight="650">T3 · LLM, fenced</text>
+  <text x="1280" y="496" fill="#5b6472" font-size="13.5">reads a UTR from a narration no</text>
+  <text x="1280" y="515" fill="#5b6472" font-size="13.5">parser was written for — proposes</text>
+  <text x="1280" y="534" fill="#5b6472" font-size="13.5">linkage only, never money</text>
+
+  <rect x="1280" y="568" width="14" height="14" rx="3" fill="#d97706"/>
+  <text x="1306" y="581" fill="#16181d" font-size="17" font-weight="650">T4 · the analyst</text>
+  <text x="1280" y="604" fill="#5b6472" font-size="13.5">typed queue, evidence chain,</text>
+  <text x="1280" y="623" fill="#5b6472" font-size="13.5">suggested action, owner</text>
+
+  <rect x="1280" y="656" width="272" height="192" rx="9" fill="#f7f3fd" stroke="#c9b3ee" stroke-width="1.5"/>
+  <text x="1300" y="686" fill="#5b21b6" font-size="17" font-weight="650">The fence</text>
+  <text x="1300" y="714" fill="#16181d" font-size="13.5">Every T3 proposal is re-verified by</text>
+  <text x="1300" y="733" fill="#16181d" font-size="13.5">exact lookup. It resolves, or it is</text>
+  <text x="1300" y="752" fill="#16181d" font-size="13.5">rejected. No tolerance, no scoring.</text>
+  <text x="1300" y="782" fill="#5b21b6" font-size="13.5">Hostile adjudicator: 22 proposed,</text>
+  <text x="1300" y="801" fill="#5b21b6" font-size="13.5">22 blocked, precision unmoved</text>
+  <text x="1300" y="820" fill="#5b21b6" font-size="13.5">at 100.00%.</text>
+
+  <rect x="392" y="862" width="836" height="40" rx="8" fill="#f4f5f7" stroke="#c9cfd8" stroke-width="1.5"/>
+  <text x="416" y="888" fill="#16181d" font-size="15">The headline edge, in order: <tspan fill="#2563eb" font-weight="700">T0 links it</tspan> · <tspan fill="#7c3aed" font-weight="700">T3 links it when the narration defeats the parser</tspan> · <tspan fill="#059669" font-weight="700">T1 explains the money</tspan> · <tspan fill="#d97706" font-weight="700">T4 gets the rest</tspan></text>
+</svg>
