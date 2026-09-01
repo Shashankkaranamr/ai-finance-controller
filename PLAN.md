@@ -511,6 +511,7 @@ the end is panic.
 | 7 | Streamlit UI beyond one screen | Deferred | The video needs one screen |
 | 8 | Multi-gateway collision class | **CUT 01 Sep — decided, not deferred** | The lever is closed. Building difficulty in order to justify the LLM is the §9 anti-pattern; the honest line is that arithmetic closes this loop and the LLM earns its place only in narration parsing (D-016) |
 | 9 | TDS 194-O | Out by persona | Defend the decision, not the mechanics |
+| 10 | Third seed on a different rate card | **DECLINED 01 Sep** | Would upgrade D-019's claim from "across worlds" to "across contracts"; 1–2 h because the rate card would have to become injectable. Fixes nothing broken. Revisit only if Inc 6 finishes early (D-024) |
 | — | **Never cut** | — | Held-out seed · false-clear metric · degraded mode · Increment 6 |
 
 ---
@@ -702,6 +703,9 @@ expensive than a gap — an analyst who trusts a link stops looking.
 **What it rules out:** Tie-breaking by value date, amount or row order. Any of those would produce a
 100% recall number that means less than the 99.97% one.
 **Supersedes:** —
+**Reaffirmed 01 Sep 2026** when D-023 extended the same refusal to Tier 3. The two must move
+together: if tie-breaking is ever allowed here, Tier 3 has to tie-break identically or the tiers
+disagree about the same data.
 
 ### D-015 · Increment 1 · 2026-08-31 · The residual is 100% mechanical BY CONSTRUCTION, and Inc 2 must decide what that means
 **Decision:** Record the measured residual distribution — every paise of Tier 0's Rs 3,96,133.81
@@ -763,6 +767,7 @@ a real cross-check rather than a restatement. Measured: **100% on both seeds.**
 evidence about narration parsing, and the two must not be conflated in the README or the video.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**
+**Reviewed and APPROVED by the user, 01 Sep 2026.**
 
 ### D-019 · Increment 2 · 2026-09-01 · "Generalises across worlds, not across contracts"
 **Decision:** The claim we will defend about Tier 1 is exactly that sentence, backed by the published
@@ -779,6 +784,7 @@ where Tier 1 should report mismatches rather than closures — logged as the top
 list rather than built tonight, because it is new scope at 69% of the calendar.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**
+**Reviewed and APPROVED by the user, 01 Sep 2026.** Wording kept; the third seed is declined — see D-024.
 
 ### D-020 · Increment 2 · 2026-09-01 · An exception describes the final state of the graph
 **Decision:** The pipeline drops exceptions whose subject edge ended `EXPLAINED`, recording each
@@ -791,6 +797,7 @@ the agent. The audit log keeps the intermediate view reconstructible.
 statement about now; the audit log is the history.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**
+**Reviewed and APPROVED by the user, 01 Sep 2026.**
 
 ### D-021 · Increment 3 · 2026-09-01 · Tier 3 supplies linkage only, and runs before Tier 1
 **Decision:** The adjudicator creates `MATCHED` edges tagged `linked_by=T3_LLM`, and Tier 1 then
@@ -804,6 +811,7 @@ from both the graph and the ablation, making the LLM look useless by constructio
 future tier setting `EXPLAINED` without the arithmetic engine agreeing.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**
+**Reviewed and APPROVED by the user, 01 Sep 2026.**
 
 ### D-022 · Increment 3 · 2026-09-01 · With no API key, the fence is measured and accuracy is not claimed
 **Decision:** Build and test the adjudicator, cache, verifier gate, `blocked_hallucination`, degraded
@@ -820,6 +828,9 @@ video until a key produces one. Also rules out making the SDK a hard dependency,
 the clean-clone gate CLAUDE.md protects.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**
+**Reviewed and APPROVED by the user, 01 Sep 2026.** The no-number clause is expected to be superseded by a
+new entry once an API key produces a measured figure — superseded, never edited.
+The optional-extra decision stands permanently regardless.
 
 ### D-023 · Increment 3 · 2026-09-01 · Tier 3 inherits Tier 0's refusal to link an ambiguous UTR
 **Decision:** Tier 3 skips credits already flagged `DUPLICATE_UTR`, and rejects any proposal
@@ -833,3 +844,18 @@ having this: linkage precision 99.97% and a statement that no longer foots.
 distinct failure mode — the model was correct and the DATA was ambiguous.
 **Supersedes:** —
 **Made autonomously overnight; open for review.**
+**Reviewed and APPROVED by the user, 01 Sep 2026.**
+
+### D-024 · Increment 3 (post-gate) · 2026-09-01 · The different-rate-card seed is declined, not deferred
+**Decision:** Do **not** build a third seed generated with a different rate card. D-019's claim —
+"Tier 1 generalises across worlds, not across contracts" — stands as the claim we defend, with the
+~49/51 schema/contract split published beside it.
+**Why:** The user's call, and the reasoning is worth recording verbatim because this is exactly the
+kind of thing that gets re-litigated at 2am on the last day: *two engine days is too tight to spend
+on strengthening a claim that is already honest and defensible as written — the weaker claim is a
+good result, not a compromise.* The estimated cost was 1–2 hours, because the rate card is
+module-level constants and would have to become injectable; the benefit was upgrading a defensible
+claim to a slightly stronger one, not fixing anything wrong.
+**What it rules out:** Any "validated across contracts" phrasing, permanently, unless the seed is
+actually built. Reopens only if Increment 6 finishes with real time to spare, and the default is no.
+**Supersedes:** — (closes the open option flagged in D-019)
