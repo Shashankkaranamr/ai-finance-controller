@@ -789,7 +789,7 @@ def _inject_bank_anomalies(world: World) -> None:
         day = config.start_date + timedelta(days=rng.randrange(config.n_days))
         stray_utr = _utr(rng)
         world.extra_bank_credits.append(ExtraBankCredit(
-            bank_ref=f"bc_{stray_utr}",
+            bank_ref=bank_ref_for_utr(stray_utr),
             value_date=day,
             amount=Paise(rng.randrange(100_000, 2_000_000)),
             utr=stray_utr,
@@ -804,7 +804,7 @@ def _inject_bank_anomalies(world: World) -> None:
             break
         source = live[rng.randrange(len(live))]
         world.extra_bank_credits.append(ExtraBankCredit(
-            bank_ref=f"bc_{source.utr}_dup",
+            bank_ref=bank_ref_for_utr(source.utr, "d"),
             value_date=source.settled_on,
             amount=source.amount,
             utr=source.utr,
@@ -880,13 +880,29 @@ def emit_ground_truth(world: World) -> GroundTruth:
     )
 
 
+def bank_ref_for_utr(utr: str, suffix: str = "") -> str:
+    """A bank-shaped row reference that does NOT contain the UTR.
+
+    It used to be `bc_<utr>`, and that was a real leak (F-013). Three shipped
+    sentences rested on "the UTR is physically cut out of the narration at 40
+    characters, so no tier can recover it" -- while every one of those rows
+    carried the full UTR in its own primary key, one field away. The claim was
+    false as shipped, and the `blocked_unverifiable` counter inherited it.
+
+    A CRC keeps it deterministic and stable (invariant 2) without being derivable
+    back to the UTR, which is what a real statement looks like: the bank's own
+    row id has nothing to do with the sender's reference.
+    """
+    return f"bc_{zlib.crc32(utr.encode('utf-8')):010d}{suffix}"
+
+
 def bank_uid_for(settlement: Settlement) -> str:
     """Bank rows have no natural key, so derive a stable one from the settlement.
 
     Deterministic and independent of row order -- the alternative, a positional
     counter, would change every id whenever an upstream row count moved.
     """
-    return f"bc_{settlement.utr}"
+    return bank_ref_for_utr(settlement.utr)
 
 
 RULE_VERSION_USED = RULE_VERSION

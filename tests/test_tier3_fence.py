@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from recon.domain.graph import EdgeKind, EdgeStatus, ExceptionType, Tier
+from recon.domain.truth import GroundTruth
 from recon.ingest.load import load_all
 from recon.llm.client import AdjudicationRequest, AdjudicationResult, NullAdjudicator
 from recon.resolve import pipeline
@@ -106,14 +107,20 @@ class BrokenAdjudicator:
 
 
 def _oracle_for(data_dir: Path) -> TruthfulAdjudicator:
+    """A perfect extractor, built from ground truth.
+
+    It used to recover the UTR by slicing it out of `bank_ref`, which worked only
+    because the reference leaked it (F-013). Now that a bank row id is a CRC, the
+    oracle reads the true bank->settlement edge instead — which is what an oracle
+    should have done from the start: know the answer, rather than exploit a tell.
+    """
     repo = load_all(data_dir)
-    by_utr = {s.utr.lower(): s for s in repo.settlements.values()}
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+    by_id = {s.id: s for s in repo.settlements.values()}
     mapping = {}
-    for bank_ref, credit in repo.bank.items():
-        # bank refs are derived as bc_<utr>; the oracle simply knows.
-        candidate = bank_ref[3:].removesuffix("_dup").lower()
-        if candidate in by_utr:
-            mapping[bank_ref] = candidate
+    for edge in truth.edges:
+        if edge.kind == "bank_to_settlement" and edge.dst_uid in by_id:
+            mapping[edge.src_uid] = by_id[edge.dst_uid].utr.lower()
     return TruthfulAdjudicator(utr_by_ref=mapping)
 
 
@@ -476,4 +483,57 @@ def test_both_rejection_counters_still_reject(generated_eval, tmp_path):
                      + result.llm.blocked_unverifiable)
     assert total_blocked > 0
     assert not [e for e in result.edges if e.established_by is Tier.T3_LLM]
+    assert result.metrics.linkage_precision.bps == 10_000
+
+
+def test_a_bank_reference_never_contains_the_settlement_utr(generated, generated_eval):
+    """FIX-5 / F-013. The claim "no tier can recover the truncated UTR" was false.
+
+    Every bank row's own primary key was `bc_<utr>` — the full UTR, one field away
+    from the narration it was supposedly cut out of. Three shipped sentences, the
+    `blocked_unverifiable` counter and the LLM headline's denominator all rested
+    on it.
+
+    Asserted on both seeds against every settlement UTR, not by inspecting the
+    format, so a future id scheme that reintroduces the leak fails here.
+    """
+    for data_dir in (generated, generated_eval):
+        repo = load_all(data_dir)
+        utrs = {s.utr.lower() for s in repo.settlements.values()}
+        for bank_ref in repo.bank:
+            low = bank_ref.lower()
+            leaked = [u for u in utrs if u in low]
+            assert not leaked, f"{bank_ref} contains settlement UTR {leaked[0]}"
+
+
+def test_bank_references_are_stable_and_unique(generated_eval):
+    """A CRC-derived id must still be deterministic and collision-free here."""
+    from recon.generate.world import bank_ref_for_utr
+
+    repo = load_all(generated_eval)
+    assert len(set(repo.bank)) == len(repo.bank)
+    for settlement in repo.settlements.values():
+        assert bank_ref_for_utr(settlement.utr) == bank_ref_for_utr(settlement.utr)
+
+
+def test_declining_to_answer_is_not_counted_as_a_hallucination(generated_eval, tmp_path):
+    """The prompt tells the model an empty string is a correct answer when the
+    narration has no UTR. Counting that as invention punishes the behaviour we
+    asked for and inflates a number we publish about the model."""
+
+    @dataclass(slots=True)
+    class Abstains:
+        reason: str = ""
+        calls_declined: int = 0
+
+        @property
+        def available(self) -> bool:
+            return True
+
+        def adjudicate(self, request: AdjudicationRequest) -> AdjudicationResult:
+            return AdjudicationResult(ok=True, data={"utr": ""}, rationale="no UTR present")
+
+    result = pipeline.run(generated_eval, tmp_path / "abstain", adjudicator=Abstains())
+    assert result.llm.blocked_hallucination == 0, "abstention counted as invention"
+    assert result.llm.blocked_unverifiable > 0
     assert result.metrics.linkage_precision.bps == 10_000

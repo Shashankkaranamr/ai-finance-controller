@@ -179,7 +179,13 @@ def resolve(repo: Repository, edges: list[ReconEdge],
             #
             # Both are rejected either way: an unverifiable reference must never
             # become a link. Only the accounting differs.
-            faithful = bool(proposed) and _is_faithful_reading(proposed, credit.narration)
+            # An EMPTY answer is not a hallucination. The prompt says so
+            # explicitly -- "an empty string is a correct answer when the narration
+            # does not contain one" -- and a model that declines has invented
+            # nothing. Counting abstention as invention would punish exactly the
+            # behaviour we asked for, and it inflates the number we publish about
+            # the model. Surfaced by FIX-5, when an oracle scored a hallucination.
+            faithful = (not proposed) or _is_faithful_reading(proposed, credit.narration)
             if not faithful:
                 stats.blocked_hallucination += 1
                 event = "blocked_hallucination"
