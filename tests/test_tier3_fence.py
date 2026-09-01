@@ -383,3 +383,31 @@ def test_without_the_flag_the_cli_stays_rules_only_even_with_a_key(generated, mo
         cli.main(["run", "--seed", "dev"])
 
     assert isinstance(captured["adjudicator"], NullAdjudicator)
+
+
+def test_the_adjudicator_uses_a_haiku_tier_model_and_no_effort_parameter():
+    """Model choice is part of the argument, not an implementation detail.
+
+    This job is a one-line extraction with a fixed output shape -- no reasoning, no
+    long context, no tools. Reaching for the largest model would cost several times
+    more for no measurable gain, and would undercut the claim the whole submission
+    makes: fence the LLM into the narrow job it is good at. An oversized model on a
+    narrow job is the same mistake as an LLM doing arithmetic, one level up.
+
+    `effort` is asserted absent because it is NOT supported on the Haiku tier and
+    would be rejected on every call -- the kind of error that only shows up when
+    real money is being spent.
+    """
+    from pathlib import Path as _Path
+
+    import recon.llm.anthropic_client as module
+
+    assert "haiku" in module.DEFAULT_MODEL
+    source = _Path(module.__file__).read_text(encoding="utf-8")
+    # Assert the PARAMETERS are not passed, rather than that the words never
+    # appear -- the comments explain why they are absent, and a test that trips
+    # over its own documentation teaches people to delete comments.
+    assert "output_config=" not in source, (
+        "output_config/effort is rejected on the Haiku tier")
+    assert "thinking=" not in source, (
+        "no thinking config belongs on a fixed-shape extraction")

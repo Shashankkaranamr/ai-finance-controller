@@ -31,7 +31,18 @@ from dataclasses import dataclass, field
 
 from .client import AdjudicationRequest, AdjudicationResult
 
-MODEL = "claude-opus-5"
+# Haiku tier, deliberately. This job is a short extraction from one line of free
+# text with a fixed output shape -- no reasoning, no long context, no tool use.
+# Reaching for the largest model would cost ~5x for no measurable gain on a task
+# like this, and it would undercut the argument the whole submission makes: fence
+# the LLM into the narrow job it is actually good at. Using an oversized model for
+# a narrow job is the same mistake as using an LLM for arithmetic, one level up.
+#
+# Overridable by env so a model-id correction is a one-line change rather than a
+# code edit -- the id below is written from the current model reference, and the
+# first live call is what confirms it (a wrong id raises NotFoundError, which the
+# broad handler below turns into a clean degrade rather than a crash).
+DEFAULT_MODEL = "claude-haiku-4-5"
 MAX_TOKENS = 1024
 
 SYSTEM_PROMPT = """\
@@ -62,7 +73,8 @@ class AnthropicAdjudicator:
     """
 
     api_key: str | None = None
-    model: str = MODEL
+    model: str = field(default_factory=lambda: os.environ.get("RECON_LLM_MODEL",
+                                                              DEFAULT_MODEL))
     reason: str = ""
     calls_declined: int = 0
     _client: object | None = field(default=None, repr=False)
@@ -97,9 +109,10 @@ class AnthropicAdjudicator:
                 model=self.model,
                 max_tokens=MAX_TOKENS,
                 system=SYSTEM_PROMPT,
-                # Effort low: this is a short extraction, not a reasoning task, and
-                # it runs once per unparsed narration across a whole statement.
-                output_config={"effort": "low"},
+                # No `output_config.effort` and no `thinking`. Both are deliberate:
+                # the effort parameter is not supported on the Haiku tier and would
+                # be rejected outright, and this task wants no thinking at all --
+                # it is a one-line extraction with a fixed output shape.
                 messages=[{"role": "user", "content": narration}],
             )
             text = "".join(block.text for block in response.content
