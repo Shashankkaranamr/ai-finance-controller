@@ -411,3 +411,23 @@ def test_the_adjudicator_uses_a_haiku_tier_model_and_no_effort_parameter():
         "output_config/effort is rejected on the Haiku tier")
     assert "thinking=" not in source, (
         "no thinking config belongs on a fixed-shape extraction")
+
+
+@pytest.mark.parametrize("raw", [
+    '{"utr": "abc"}',
+    '```json\n{"utr": "abc"}\n```',
+    '```\n{"utr": "abc"}\n```',
+    '   ```json\n{"utr": "abc"}\n```   ',
+])
+def test_a_fenced_json_response_is_parsed(raw):
+    """The first live response came back fenced and json.loads rejected it.
+
+    Handled as plumbing rather than by tightening the prompt: a firmer instruction
+    would still fail intermittently, and tuning the prompt against observed
+    held-out behaviour is the eval-tuning deviation #4 forbids.
+    """
+    import json as _json
+
+    from recon.llm.anthropic_client import _unfence
+
+    assert _json.loads(_unfence(raw))["utr"] == "abc"

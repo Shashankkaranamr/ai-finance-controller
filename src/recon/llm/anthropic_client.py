@@ -45,6 +45,35 @@ from .client import AdjudicationRequest, AdjudicationResult
 DEFAULT_MODEL = "claude-haiku-4-5"
 MAX_TOKENS = 1024
 
+# An identity-linked API key is scoped to a workspace and the API rejects a call
+# that does not name one: 400 `anthropic-workspace-id is required`. It is not a
+# secret, but it is read from the environment like the key so that neither ever
+# has to be written into a command line or a config file in the repo.
+WORKSPACE_HEADER = "anthropic-workspace-id"
+
+
+def _unfence(text: str) -> str:
+    """Strip a markdown code fence if the model wrapped its JSON in one.
+
+    It does, routinely. The first live response came back as a fenced block
+    and json.loads rejected it at character zero.
+
+    Handled here rather than by tightening the prompt, and the distinction
+    matters: a firmer instruction would still fail intermittently, and tuning
+    the prompt against observed HELD-OUT behaviour is precisely the eval-tuning
+    that deviation #4 forbids. Stripping a fence is plumbing, and plumbing is
+    allowed to know what the world is like.
+    """
+    text = text.strip()
+    if not text.startswith("```"):
+        return text
+    if "\n" in text:
+        text = text.split("\n", 1)[1]
+    if text.rstrip().endswith("```"):
+        text = text.rstrip()[:-3]
+    return text.strip()
+
+
 SYSTEM_PROMPT = """\
 You extract payment references from Indian bank statement narrations.
 
@@ -91,7 +120,9 @@ class AnthropicAdjudicator:
             self.reason = ("the anthropic SDK is not installed; "
                            "install the optional extra: pip install -e '.[llm]'")
             return
-        self._client = anthropic.Anthropic(api_key=key)
+        workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+        headers = {WORKSPACE_HEADER: workspace} if workspace else None
+        self._client = anthropic.Anthropic(api_key=key, default_headers=headers)
 
     @property
     def available(self) -> bool:
@@ -117,16 +148,20 @@ class AnthropicAdjudicator:
             )
             text = "".join(block.text for block in response.content
                            if getattr(block, "type", None) == "text")
-            payload = json.loads(text)
+            payload = json.loads(_unfence(text))
         except Exception as exc:
             # Deliberately broad. A vendor exception, a network failure and a
             # malformed response are the same event to this pipeline: no usable
             # answer, degrade. Narrowing it would only add ways to crash a batch
             # that Sec 8 requires to complete.
             self.calls_declined += 1
+            # 600, not 200. The first live error this ever saw was
+            # "anthropic-workspace-id is required ... send" -- truncated exactly
+            # where it started explaining the fix. A degrade path that hides why it
+            # degraded is only half a degrade path.
             return AdjudicationResult(
                 ok=False,
-                reason_unavailable=f"{type(exc).__name__}: {exc}"[:200])
+                reason_unavailable=f"{type(exc).__name__}: {exc}"[:600])
 
         if not isinstance(payload, dict):
             self.calls_declined += 1

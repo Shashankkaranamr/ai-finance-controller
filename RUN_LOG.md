@@ -533,3 +533,94 @@ entries post and balance, typed and prioritised queue, degraded mode, audit log,
 **Increment 6 is the remaining work, and it is protected.** Video, README, architecture doc, failure
 log — 3 of the 4 things Razorpay actually receives. The README rewrite is the first task and needs
 sign-off because it changes public framing.
+
+---
+
+## Increment 3 — LIVE adjudicator run · 01 Sep 2026
+
+**The first real LLM calls this project has made.** 22 held-out narrations, `claude-haiku-4-5`,
+one call each, ~47 s wall clock. Reported exactly as returned.
+
+### The ablation, measured
+
+| Metric | rules only | + adjudicator |
+|---|---|---|
+| Explanation rate (bank credits) | 0.00% (0/24) | **20.83% (5/24)** |
+| Settlement coverage | 0.00% (0/22) | 22.73% (5/22) |
+| **Linkage precision** | 100.00% (3,488/3,488) | **100.00% (3,493/3,493)** |
+| Linkage recall | 99.40% | 99.54% |
+| Journal entries posted | 0 | 5 |
+| Statement foots | YES | YES |
+| Adjudicator calls | 0 | 22 |
+| `blocked_hallucination` | 0 | 17 |
+
+**Precision did not move.** 17 rejected proposals, and not one reached the ledger. The
+hostile-adjudicator test predicted this; the adversary here was the real model.
+
+### The finding that matters more than the headline
+
+`blocked_hallucination = 17` **overstates hallucination by roughly five times**, and the counter is
+what is wrong, not the model. Checked mechanically rather than by eye:
+
+| Of the 22 held-out narrations | Count |
+|---|---|
+| Correct and verified | **5** |
+| **Full UTR provably ABSENT from the narration** | **14** |
+| Genuine extraction errors | **3** |
+
+The `neft_truncated` family truncates at 40 characters. The prefix
+`NEFT-RAZORPAYSOFTWAREPVTLT-UTR` is 30 of them, so only **10 of the 16 UTR characters survive** in the
+source at all. In **all 14** cases the model returned exactly the substring that was present:
+
+```
+narration : NEFT-RAZORPAYSOFTWAREPVTLT-UTR1487099871
+true utr  : 14870998713daxoq
+proposed  : 1487099871          <- exactly what the text contains
+```
+
+That is not a hallucination. It is the same shape as `REFUND_ORPHANED`: the evidence is not in the
+extract, and no tier — LLM included — can recover it. **Rejecting it was still correct**, because an
+unverifiable reference must never become a link. Counting it as a hallucination is the error.
+
+By family:
+
+| Family | correct / blocked | note |
+|---|---|---|
+| `neft_truncated` | 0 / 14 | UTR truncated out of the source; unrecoverable by anyone |
+| `rtgs_no_delimiter` | 5 / 3 | UTR present; the model mis-split a delimiter-free run |
+
+**Accuracy where the UTR was actually present: 5 of 8 (62%).** That is the honest number for what the
+model can do on this task, and it is very different from the 5-of-22 the headline implies.
+
+This is D-023 again, one level along: *"the model was correct" and "the action was safe" are
+different questions.* We drew that distinction for a duplicated UTR and failed to draw it for an
+absent one. Splitting the counter changes a video-facing number, so it is **proposed, not done** —
+see the open question below.
+
+### The three plumbing fixes this run forced
+
+1. **Workspace header.** An identity-linked API key is workspace-scoped; without
+   `anthropic-workspace-id` every call 400s. Read from `ANTHROPIC_WORKSPACE_ID`, sent via
+   `default_headers` (the SDK client has no workspace parameter — checked the constructor).
+2. **Markdown fence stripping.** The model wraps its JSON in ` ```json ` fences and `json.loads`
+   rejected it at character zero. Handled as plumbing, deliberately **not** by tightening the prompt:
+   a firmer instruction would still fail intermittently, and tuning the prompt against observed
+   held-out behaviour is the eval-tuning deviation #4 forbids.
+3. **Error truncation widened, 200 → 600 chars.** The very first live error read
+   `anthropic-workspace-id is required ... send` — cut off exactly where it began explaining the fix.
+   A degrade path that hides why it degraded is only half a degrade path.
+
+### What was deliberately NOT done
+
+**The prompt was not touched, and will not be on the strength of this run.** It was written blind,
+before any held-out narration was seen, exactly as the regex was written against `dev` families only.
+Improving it against results from the eval seed would make the ablation measure our tuning rather
+than the model. If it is worth improving, that happens against `dev` narrations, as a separate dated
+decision, and is then re-measured here.
+
+### Open question for review
+
+Should `blocked_hallucination` split into `blocked_hallucination` (3) and
+`blocked_unverifiable` (14)? The argument for is that the current number is wrong in a way that
+misrepresents both the model and the fence. The argument for waiting is that it moves a figure likely
+to appear in the video. **Not changed pending sign-off.**
