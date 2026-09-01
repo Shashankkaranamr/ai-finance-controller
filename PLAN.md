@@ -892,3 +892,81 @@ two runs. Also rules out claiming byte-identical runs with `--llm` enabled.
 measured figures. D-022's other half — that the SDK stays an optional extra — stands unchanged.
 **Approved in principle by the user (split + supersession); the range framing is new and open for
 review.**
+
+### D-027 · Audit response · 2026-09-01 · Tier 2 returns, as deterministic corroboration
+**Decision:** Link an unmatched bank credit to an unmatched settlement when `(amount, value_date)`
+resolves to exactly one candidate **in both directions**. No tolerance, no scoring, no ranking; every
+tie refused. Runs after Tier 0's narration join and **before** Tier 3.
+**Why:** An adversarial audit showed a two-field exact join reproduces the entire dev result on the
+held-out seed — 20 of 24 credits — while the shipped system reported 0% explanation and credited an
+LLM with 3–5 of 22. The resolver was ignoring two columns it had already loaded. Measured after:
+eval explanation 0.00% → 83.33%, recall 99.40% → 99.97%, precision unmoved at 100.00%, zero model
+calls. Ordering before Tier 3 is deliberate: the LLM is only asked about what deterministic evidence
+could not place, which is what keeps its measured contribution honest. It is now asked 2 questions
+instead of 22, and adds zero.
+**What it rules out:** Quoting the LLM's held-out contribution without the deterministic baseline
+beside it. Also rules out breaking a tie on value date, amount or row order — the same refusal D-014
+makes.
+**Supersedes:** partially reverses **D-016** for candidate *generation*. D-016 cut Tier 2 as a
+subset-sum search over manufactured ambiguity built to give the LLM a job; that stays cut and stays
+right. This is the other half of the brief's Tier 2 and it exists because the data demanded it, not
+because the LLM needed something to do.
+
+### D-028 · Audit response · 2026-09-01 · A per-dispute fee is not an unlinked reversal
+**Decision:** `CHARGEBACK_UNLINKED` additionally requires `payment_id is not None`.
+**Why:** A dispute emits two lines. The reversal carries the payment_id of the capture it reverses;
+the flat fee carries none, because it reverses nothing. Without the clause every fee line was
+reported to an analyst as "The reversal is real; the reference is missing" — false about a Rs 1,500
+fee. 17 raised against 5 real on dev; 13 against 4 on eval. Now 5/5 and 4/4.
+**What it rules out:** Discriminating on `description`, which is prose we wrote (D-017). The
+discriminator was already in the schema.
+**Supersedes:** —
+
+### D-029 · Audit response · 2026-09-01 · A bank row id must not carry the UTR
+**Decision:** `bank_ref` is a CRC of the UTR, not the UTR. Deterministic and stable for invariant 2,
+not derivable back.
+**Why:** Three shipped sentences rested on "the UTR is physically cut out of the narration, so no tier
+can recover it" while 22 of 24 rows carried the full UTR in their own primary key, one field away.
+The claim was false as shipped and `blocked_unverifiable`, D-025's argument and the LLM headline's
+denominator of 8 all inherited it. Also removes an obvious synthetic tell.
+**What it rules out:** Any test or oracle recovering the UTR by slicing `bank_ref` — the test oracle
+was doing exactly that, which is an oracle exploiting a tell rather than knowing the answer. It now
+reads the true edge. **Consequence found immediately:** with the tell gone the oracle returned an
+empty string and the fence scored it a *hallucination*, though the prompt says an empty answer is
+correct when no UTR is present. Abstention is not invention, and is now counted as unverifiable.
+**Supersedes:** —
+
+### D-030 · Audit response · 2026-09-01 · Publish the queue's false-alarm rate
+**Decision:** Publish `exception_queue_precision` — raised breaks that are real, over raised breaks
+evaluable against unit-keyed truth — per seed, with false alarms attributed per code.
+**Why:** The suite measured false clear with genuine rigour (D-009, D-022) and measured the opposite
+direction not at all, so a held-out queue could be 26% noise with no number moving. §6 names an
+inflated exception count as the thing that understates the agent. Measured: dev 89.35% → 94.61%,
+eval 73.60% → 92.89% after FIX-1 and FIX-3.
+**What it rules out:** Reporting detection recall alone. Recall of 1.0 obtained by flagging
+everything is not a detection result, and on eval the resolver was close to doing exactly that.
+**Supersedes:** —
+
+### D-031 · Audit response · 2026-09-01 · "Missing" requires a fully read statement
+**Decision:** `MISSING_BANK_CREDIT` is asserted only when every credit in the statement has been
+read. While credits remain unparsed, an unlinked settlement gets `SETTLEMENT_UNCONFIRMED`
+(informational). `NARRATION_UNPARSEABLE` is no longer a break.
+**Why:** "The money never arrived" is a claim a treasury team acts on. On the held-out seed it was
+made about 22 settlements when 21 of those credits were in the bank file. The settlement is still
+flagged either way — detection is unaffected and a test asserts that directly — but the code, the
+severity and the suggested action change, and those are what a human acts on. A parse failure is our
+limitation, not something wrong with the merchant's money, and counting it as a break also
+double-counted one event as both an unreadable credit and an unconfirmable settlement.
+**What it rules out:** Asserting absence from the failure of our own parser.
+**Supersedes:** —
+
+### D-032 · Audit response · 2026-09-01 · Linkage precision is published per grain
+**Decision:** Emit `linkage_precision_by_kind` alongside the aggregate.
+**Why:** "Precision unmoved at 100.00% under a hostile adjudicator" is true and structurally
+insensitive: 3,488 of 3,508 eval edges are id-joins that cannot be wrong, so the aggregate holds near
+100% whatever happens at the bank grain — the only grain an adjudicator can reach. 22 hostile edges
+would have read 99.4%. Per grain the bank number is 20/20, and a hallucination reaching it would read
+20/42.
+**What it rules out:** Resting the fence claim on the aggregate. The aggregate is not wrong; it is
+just not the number the claim depends on.
+**Supersedes:** —

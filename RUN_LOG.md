@@ -702,3 +702,99 @@ Supporting beats, in order:
    An oversized model on a narrow job is the same mistake as an LLM doing arithmetic, one level up.
 4. Closing frame: *we gave the LLM the one job it is suited for, on the smallest model that does it,
    and then measured it against an adversary, against a held-out set, and against itself.*
+
+---
+
+## Adversarial audit — six fixes · 01 Sep 2026
+
+An external adversarial read of the shipped submission — docs against the actual rows in
+`data/generated/**` and `out/**`, not against the summary tables. It found **three load-bearing false
+or unmeasured claims in shipped documents**. Not polish: two of them were sentences in the README, the
+architecture doc and the video script that the repo's own data files contradicted.
+
+CLAUDE.md says not to reopen a closed increment "unless it's a real problem". These qualified, so
+Increments 1–3 were reopened on 01 Sep. Every number below is re-measured; nothing above this line
+was edited.
+
+### What was wrong, and what it is now
+
+| | before | after |
+|---|---|---|
+| **eval — settlements reported MISSING that had arrived** | **21 of 22** | **0** |
+| eval — exception queue precision | 73.60% | **92.89%** (183/197) |
+| dev — exception queue precision | 89.35% | **94.61%** (193/204) |
+| dev — `CHARGEBACK_UNLINKED` raised / real | 17 / 5 | **5 / 5** |
+| eval — `CHARGEBACK_UNLINKED` raised / real | 13 / 4 | **4 / 4** |
+| **eval — explanation rate** | **0.00%** | **83.33%** (20/24) |
+| eval — settlement coverage | 0.00% | **90.91%** (20/22) |
+| eval — linkage recall | 99.40% | **99.97%** |
+| **bank refs leaking the settlement UTR** | **22 of 24** | **0 of 24** |
+| queue precision measured at all | **never** | published per seed, per code |
+| linkage precision per grain | not published | published — bank grain **20/20** |
+| LLM calls needed on eval | 22 | **2** |
+| **LLM contribution over the deterministic tiers** | claimed 3–5 of 22 | **zero** |
+
+Unmoved, and checked rather than assumed: **false clear in remit 0/192 dev, 0/184 eval**; detection
+recall 100.00% on both; linkage precision 100.00%; decomposition closure 100.00% on both; statement
+foots on both; determinism byte-identical across two runs and a regeneration on both seeds.
+
+### The three real problems
+
+**RP-1 — the queue told treasury that Rs 33 lakh never arrived. It had.** On the held-out seed no
+narration parses, so no credit is linked, so all 22 settlements were reported `MISSING_BANK_CREDIT`.
+Exactly one was real; the other 21 credits were sitting in `bank.jsonl`. And **no published metric
+could see it**, because the suite measured false clear with real rigour and never measured false
+alarms at all. Fixed by FIX-2 (measure it) and FIX-3 (stop asserting it).
+
+**RP-2 — a two-field exact join reproduced the whole result, with no model.** `(amount, value_date)`
+resolves 20 of 24 held-out credits to exactly one settlement. The resolver was ignoring two columns
+it had already loaded, reporting 0% explanation, and crediting an LLM with 3–5 of 22. Fixed by FIX-4.
+
+**RP-3 — "the UTR is physically cut out of the statement" was false as shipped.** Every bank row's
+own primary key was `bc_<utr>` — the full UTR, one field from the narration it was supposedly absent
+from. 22 of 24 leaked it. Three shipped sentences, the `blocked_unverifiable` counter and the LLM
+headline's denominator of 8 all rested on it. Fixed by FIX-5.
+
+### The ablation, re-measured — this is the headline change
+
+| Cumulative | dev | eval (held out) |
+|---|---|---|
+| T0 · narration only | 0.00% (0/24) | 0.00% (0/24) |
+| + T1 · arithmetic | **83.33%** (20/24) | 0.00% (0/24) |
+| + T2 · (amount, date) corroboration | 83.33% | **83.33%** (20/24) |
+| + T3 · LLM | 83.33% | **83.33% — adds nothing** |
+
+Live, post-fix, with a real key: the adjudicator is now asked **2 questions instead of 22**, because
+corroboration placed the other 20 first. It returned 0 hallucinations, 2 unverifiable, and moved the
+explanation rate by **zero**.
+
+**That is a better submission than the one it replaces.** We went looking for the LLM's job, found a
+deterministic rule that does it better on our own data, published the comparison, and cut the model
+back to the residue nothing else could place — where it also added nothing. The previous story
+credited a model for work two columns were already doing.
+
+### What this does not prove
+
+Corroboration works this well partly because the generator is clean: `derive_bank` copies the
+settlement's amount and date straight through, and a 4-day cycle gives one settlement per date. A
+real statement nets bank charges out of the credit, batches across dates, and settles daily. Said in
+`ARCHITECTURE.md` §4 and in the Tier 2 module docstring rather than left to be found.
+
+### Also fixed, surfaced by the work rather than by the audit
+
+An **empty** answer from the adjudicator was being counted as a hallucination — while the prompt
+explicitly tells the model an empty string is correct when no UTR is present. Abstention is not
+invention; counting it as such punishes the behaviour we asked for and inflates a number we publish
+about the model. Found when a *perfect oracle* scored a hallucination after FIX-5 removed the tell it
+had been exploiting.
+
+### Still open, deliberately
+
+`DUPLICATE_PAYMENT` is now the largest remaining false-alarm source (10 dev, 14 eval): Tier 0 flags
+**both** lines of a duplicated pair because it cannot tell which is the copy, and truth marks one.
+That is a defensible design choice, documented in `tier0.py`, and it is now *visible* rather than
+invisible — which is what FIX-2 was for. Collapsing the pair into a single record naming both lines
+would drop false alarms to near zero and is the obvious next candidate.
+
+FIX-10 (a third seed on a different rate card) remains declined per D-024, and nothing in the audit
+weakened that reasoning.

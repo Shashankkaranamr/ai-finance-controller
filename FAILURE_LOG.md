@@ -259,4 +259,102 @@ Increment 3 entry in RUN_LOG carries a dated correction rather than a silent edi
 
 ---
 
+### F-012 · 01 Sep 2026 · Every chargeback fee was reported to an analyst as a broken reversal
+
+**What broke.** `CHARGEBACK_UNLINKED` fired on any adjustment with a `dispute_id`, no `order_id` and
+no credit. A dispute emits **two** lines matching that shape: the reversal, and a flat Rs 1,500
+per-dispute fee. So every fee line was queued with the sentence *"The reversal is real; the reference
+is missing."* That is simply false about a fee — it reverses nothing — and it was addressed to a human
+who would go looking for a sale that does not exist.
+
+**Scale.** 17 raised on dev against 5 real; 13 against 4 on eval. Roughly 70% of that alarm was noise.
+
+**Why it survived.** No metric measured false alarms. Detection recall was 100%, false clear was 0,
+typing accuracy was 100% — every published number looked perfect while a third of one alarm class was
+wrong. See F-015.
+
+**Recovery.** One clause: the reversal carries the `payment_id` of the capture it reverses; the fee
+carries none. The discriminator was already in the schema and needed no rate card. The test asserts
+the raised set **equals** the injected set rather than counting alarms, so it cannot pass by the false
+alarm merely becoming rarer.
+
+---
+
+### F-013 · 01 Sep 2026 · The UTR we said was unrecoverable was in the row's own primary key
+
+**What broke.** README, `ARCHITECTURE.md` Finding 3, D-025, the RUN_LOG live-run entry and the video's
+closing beat all rested on: *"14 of 22 held-out credits have the UTR physically cut out of the
+statement. No tier recovers those."* Every one of those rows had `bank_ref = "bc_" + utr` — the
+complete UTR, one field away from the narration it was supposedly absent from. 22 of 24 leaked it.
+
+**Why it mattered.** It is a false sentence in four shipped documents, and it is load-bearing:
+`blocked_unverifiable` means what it means because of it, D-025's "same shape as REFUND_ORPHANED"
+parallel inherits it, and the headline LLM denominator of 8 exists only because 14 were declared
+unrecoverable. With `bank_ref` present, all 22 are recoverable.
+
+**Recovery.** `bank_ref` is now a CRC of the UTR — deterministic and stable for invariant 2, not
+derivable back, and closer to a real statement, where the bank's row id has nothing to do with the
+sender's reference. The leak test asserts against every settlement UTR on both seeds rather than
+checking the id format, so a future scheme that reintroduces it fails.
+
+**It was load-bearing in the tests too.** The oracle adjudicator had been recovering the UTR by
+slicing `bank_ref` — an oracle exploiting a tell rather than knowing the answer. With the tell gone it
+returned an empty string, and the fence scored that a **hallucination** — while the prompt explicitly
+tells the model an empty string is the correct answer when no UTR is present. Abstention is not
+invention. Two bugs, one of them only visible because the other was fixed.
+
+---
+
+### F-014 · 01 Sep 2026 · We told treasury Rs 33 lakh never arrived. It had.
+
+**What broke.** On the held-out seed no narration parses, so no credit is linked, so
+`_flag_missing_bank_credits` reported **all 22 settlements** as `MISSING_BANK_CREDIT` — Rs 33.2 lakh.
+Exactly one was genuinely missing. The other 21 credits were sitting in `bank.jsonl`, unread.
+
+**Why it mattered more than the count.** `MISSING_BANK_CREDIT` carries the action *"raise with the
+gateway quoting the UTR"*, and it is the top of a queue sorted by cash at risk. The exception the
+video planned to open on was one of the false ones. A judge opening `bank.jsonl` during that beat
+inverts the submission's entire honesty argument in one sentence.
+
+**Why no number caught it.** The metric suite measured one error direction — false clear — with real
+rigour, and the other not at all. Detection recall was 100% *because* the resolver flagged everything;
+recall of 1.0 obtained by flagging everything is not a detection result.
+
+**Recovery.** "The money never arrived" is only defensible once every credit has been read. With
+credits unparsed, the honest claim is weaker and different: `SETTLEMENT_UNCONFIRMED`, informational,
+with an action that says explicitly *do not chase the gateway on the strength of this record*.
+Detection is unaffected — the settlement is still flagged, and the test asserts that directly.
+`NARRATION_UNPARSEABLE` also stopped being a break: our parser failing is not the merchant's money
+being wrong, and counting it as one double-counted a single event.
+
+---
+
+### F-015 · 01 Sep 2026 · Two columns already in memory did the LLM's job better than the LLM
+
+**What broke.** Nothing crashed. The system reported 0% explanation on the held-out seed, attributed
+the gap entirely to narration parsing, and credited an LLM with recovering 3–5 of 22 — while
+`(amount, value_date)` resolved **20 of 24** credits to exactly one settlement, using two columns the
+resolver had already loaded and chose not to read.
+
+**Why it mattered.** It is the first question any competent reviewer asks — *"your credit equals the
+settlement amount to the paise, on the settlement date; why do you need the narration at all?"* — and
+it had no answer. Worse, the LLM's entire measured contribution was work a deterministic rule was
+already capable of doing better.
+
+**Recovery.** Built it: Tier 2 corroboration, exact on both fields, uniqueness required in both
+directions, every tie refused as D-014 refuses a duplicated UTR. eval explanation 0.00% → 83.33%,
+recall 99.40% → 99.97%, precision unmoved, zero model calls. The adjudicator is now asked **2**
+questions instead of 22 and adds **zero** on top.
+
+**The result is better than the one it replaces.** We went looking for the LLM's job, found a
+deterministic rule that does it better on our own data, and published the comparison. What we cannot
+claim is that this generalises: `derive_bank` copies the settlement's amount and date straight
+through and a 4-day cycle gives one settlement per date, so a real statement — netting bank charges,
+batching, settling daily — would not offer the same clean key. Stated in `ARCHITECTURE.md` §4.
+
+**Standing consequence.** A resolver that declines to read a field it has already loaded needs a
+reason recorded in the Decisions Log, not silence.
+
+---
+
 <!-- New entries below. Keep the date, what broke, why it mattered, and the recovery. -->
