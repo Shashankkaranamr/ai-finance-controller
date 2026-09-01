@@ -92,7 +92,7 @@ class Tier(Enum):
 # false-clear split so that "we did not catch it" can be separated into "we
 # silently passed it" and "no resolver for that exists yet". Bump it in the same
 # commit that lands a tier -- never ahead of one.
-BUILT_TIER = 1
+BUILT_TIER = 3
 
 
 class EdgeStatus(Enum):

@@ -163,20 +163,31 @@ def test_a_truthful_adjudicator_is_accepted_so_the_fence_is_not_a_wall(generated
     assert result.metrics.linkage_precision.bps == 10_000
 
 
-def test_an_oracle_raises_held_out_explanation_from_zero(generated_eval, tmp_path):
-    """The UPPER BOUND on what any adjudicator could contribute -- not a claim
-    about Claude, which is unmeasured here for want of an API key.
+def test_the_llm_is_measured_on_top_of_deterministic_corroboration(generated_eval, tmp_path):
+    """What the adjudicator adds ON TOP of everything deterministic (D-027).
 
-    On the held-out seed the regex extracts nothing, so explanation rate is 0%
-    for reasons that have nothing to do with the arithmetic. With linkage
-    supplied, Tier 1 explains the money exactly as it does on dev -- which
-    localises the entire held-out failure to narration parsing.
+    This test used to assert the held-out baseline was zero, and that assertion
+    was the problem rather than the property: explanation rate was zero only
+    because the resolver ignored two exact columns it had already loaded. Tier 2
+    corroborates on (amount, value_date) and the baseline is now ~83%.
+
+    So the honest question is not "can an adjudicator lift zero" — anything can —
+    but "what does it add once the deterministic tiers have finished". On this
+    data the answer is nothing, and a test that could only ever show a lift would
+    have hidden that.
     """
     baseline = pipeline.run(generated_eval, tmp_path / "base", adjudicator=NullAdjudicator())
-    assert baseline.metrics.explanation_rate_bank.numerator == 0
+    assert baseline.metrics.explanation_rate_bank.numerator > 0, (
+        "deterministic corroboration should already carry the held-out seed")
 
-    lifted = pipeline.run(generated_eval, tmp_path / "lifted", adjudicator=_oracle_for(generated_eval))
-    assert lifted.metrics.explanation_rate_bank.numerator > 0
+    lifted = pipeline.run(generated_eval, tmp_path / "lifted",
+                          adjudicator=_oracle_for(generated_eval))
+
+    # A perfect extractor may add nothing. That is a result, not a failure — but
+    # it must never SUBTRACT, and precision must hold either way.
+    assert lifted.metrics.explanation_rate_bank.numerator >= \
+        baseline.metrics.explanation_rate_bank.numerator
+    assert lifted.metrics.linkage_precision.bps == 10_000
     assert lifted.statement.foots
     for entry in lifted.journal:
         assert entry.balances

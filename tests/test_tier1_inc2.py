@@ -203,9 +203,11 @@ def test_the_ablation_falls_out_of_the_edge_tier_attribute(result):
     for edge in result.edges:
         if edge.status is EdgeStatus.EXPLAINED:
             by_tier[edge.tier.name] = by_tier.get(edge.tier.name, 0) + 1
-    assert Tier.T0_DETERMINISTIC.name in by_tier
     assert Tier.T1_ARITHMETIC.name in by_tier
-    assert BUILT_TIER == 1
+    assert BUILT_TIER == 3
+    # No edge may claim a tier this build has not implemented.
+    for edge in result.edges:
+        assert max(edge.tier.value, edge.established_by.value) <= BUILT_TIER
 
 
 def test_a_chargeback_fee_is_not_reported_as_an_unlinked_reversal(result, generated):

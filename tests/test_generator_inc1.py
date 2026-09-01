@@ -351,9 +351,9 @@ def test_built_tier_matches_the_tiers_actually_wired_in():
     from recon.resolve import pipeline
 
     source = inspect_source(pipeline)
-    assert BUILT_TIER == 1
-    assert "tier1.resolve" in source, "BUILT_TIER claims Tier 1 but it is not wired in"
-    assert "tier2" not in source, "Tier 2 is wired in but BUILT_TIER has not moved"
+    assert BUILT_TIER == 3
+    for tier in ("tier0.resolve", "tier1.resolve", "tier2.resolve", "tier3.resolve"):
+        assert tier in source, f"BUILT_TIER claims {tier} but it is not wired in"
 
 
 def inspect_source(module) -> str:

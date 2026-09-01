@@ -22,7 +22,7 @@ from ..llm.client import Adjudicator, LLMStats, NullAdjudicator, ResponseCache
 from ..money import Paise
 from ..report import exceptions as queue
 from ..report import metrics as report_metrics
-from . import tier0, tier1, tier3
+from . import tier0, tier1, tier2, tier3
 
 SOURCE_FILES = ("books.jsonl", "settlement_lines.jsonl", "settlements.jsonl", "bank.jsonl")
 
@@ -76,6 +76,12 @@ def run(data_dir: Path, out_dir: Path,
     # Tier 1 takes Tier 0's MATCHED bank edges and types what remains against the
     # contracted rate card. It returns new edges rather than mutating: the audit
     # log carries the transition, so the graph never holds two versions of a truth.
+    # Tier 2 BEFORE Tier 3: the LLM is only ever asked about credits that
+    # deterministic evidence could not place. Asking it about a credit two exact
+    # fields already identify would inflate its measured contribution and cost
+    # money for nothing (D-027).
+    edges, exception_records = tier2.resolve(repo, edges, exception_records, audit)
+
     # Tier 3 BEFORE Tier 1, because they do different jobs in a fixed order: the
     # adjudicator can only establish a LINKAGE, and the money on any edge it
     # creates still has to be explained by the arithmetic afterwards. Running it
