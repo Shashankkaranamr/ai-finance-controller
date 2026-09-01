@@ -335,3 +335,51 @@ def test_any_unresolvable_proposal_is_blocked(generated_eval, tmp_path, bad):
 
     result = pipeline.run(generated_eval, tmp_path / f"bad{len(bad)}", adjudicator=Fixed())
     assert not [e for e in result.edges if e.established_by is Tier.T3_LLM]
+
+
+# --- the CLI actually reaches the adjudicator ---------------------------------
+
+def test_the_cli_passes_the_adjudicator_through_to_the_pipeline(generated, monkeypatch):
+    """Locks a gap that really existed: every tier of fencing was built and tested,
+    and `python -m recon run` never passed an adjudicator at all -- so exporting a
+    key would have changed precisely nothing. Untestable wiring is where working
+    components go to be useless.
+    """
+    from recon import __main__ as cli
+
+    captured = {}
+
+    def fake_run(data_dir, out_dir, adjudicator=None):
+        captured["adjudicator"] = adjudicator
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "DATA", generated.parent)
+    monkeypatch.setattr(cli.pipeline, "run", fake_run)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
+
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--seed", "dev", "--llm"])
+
+    from recon.llm.anthropic_client import AnthropicAdjudicator
+    assert isinstance(captured["adjudicator"], AnthropicAdjudicator)
+
+
+def test_without_the_flag_the_cli_stays_rules_only_even_with_a_key(generated, monkeypatch):
+    """An adjudicator costs money and moves the numbers. It is opt-in, never
+    switched on by the mere presence of an environment variable."""
+    from recon import __main__ as cli
+
+    captured = {}
+
+    def fake_run(data_dir, out_dir, adjudicator=None):
+        captured["adjudicator"] = adjudicator
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "DATA", generated.parent)
+    monkeypatch.setattr(cli.pipeline, "run", fake_run)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
+
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--seed", "dev"])
+
+    assert isinstance(captured["adjudicator"], NullAdjudicator)

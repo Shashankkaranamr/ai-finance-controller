@@ -13,6 +13,7 @@ reports is not one we tuned against.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -20,6 +21,9 @@ from pathlib import Path
 from .generate.derive import generate
 from .generate.narration import SPLIT_DEV, SPLIT_EVAL
 from .generate.world import DEFAULT_DAYS, GenConfig
+from .llm.anthropic_client import AnthropicAdjudicator
+from .llm.client import NullAdjudicator
+from .money import format_bps
 from .resolve import pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -64,14 +68,43 @@ def _generate(seed: str, days: int, split: str | None = None) -> Path:
     return out_dir
 
 
-def _run(seed: str) -> int:
+def _adjudicator(use_llm: bool):
+    """Explicit opt-in, never automatic.
+
+    An adjudicator costs money and changes the numbers, so it is not switched on
+    just because a key happens to be exported. But staying silent about a key that
+    IS present would be its own trap -- someone sets it up, runs the demo, sees
+    rules-only output and concludes the integration is broken.
+    """
+    if not use_llm:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            print("note: ANTHROPIC_API_KEY is set but --llm was not passed; "
+                  "running rules-only.\n")
+        return NullAdjudicator()
+
+    adjudicator = AnthropicAdjudicator()
+    if not adjudicator.available:
+        # Not fatal. Sec 8 requires the batch to complete with zero LLM
+        # availability, so an unusable adjudicator degrades exactly like none.
+        print(f"--llm requested but unavailable: {adjudicator.reason}\n"
+              "continuing rules-only (degraded mode).\n", file=sys.stderr)
+    return adjudicator
+
+
+def _missing(seed: str) -> bool:
+    if (DATA / seed / "ground_truth.json").exists():
+        return False
+    print(f"no generated data for seed '{seed}'. Run: python -m recon generate --seed {seed}",
+          file=sys.stderr)
+    return True
+
+
+def _run(seed: str, use_llm: bool = False) -> int:
     data_dir = DATA / seed
-    if not (data_dir / "ground_truth.json").exists():
-        print(f"no generated data for seed '{seed}'. Run: python -m recon generate --seed {seed}",
-              file=sys.stderr)
+    if _missing(seed):
         return 2
 
-    result = pipeline.run(data_dir, OUT / seed)
+    result = pipeline.run(data_dir, OUT / seed, adjudicator=_adjudicator(use_llm))
     print(pipeline.render_summary(result))
 
     if not result.ok:
@@ -80,6 +113,80 @@ def _run(seed: str) -> int:
               file=sys.stderr)
         return 1
     return 0
+
+
+def _ablation(seed: str) -> int:
+    """BRIEF Sec 7's ablation, run for real: the same seed with and without the
+    adjudicator, side by side.
+
+    This is the artifact that answers "what does the LLM actually add", and it is
+    deliberately a command rather than a paragraph -- the number should come from
+    a run a reviewer can repeat, not from us.
+
+    With no key the adjudicator column is the degraded path, which is honest and
+    still worth printing: it shows the harness works and the LLM contribution is
+    exactly zero until one is configured.
+    """
+    if _missing(seed):
+        return 2
+    data_dir = DATA / seed
+
+    rules = pipeline.run(data_dir, OUT / seed / "ablation" / "rules_only",
+                         adjudicator=NullAdjudicator())
+    adjudicator = AnthropicAdjudicator()
+    if adjudicator.available:
+        pending = len([r for r in rules.exceptions if r.code == "NARRATION_UNPARSEABLE"])
+        print(f"adjudicator available; {pending} unparsed narrations will be sent.\n")
+    else:
+        print(f"adjudicator unavailable: {adjudicator.reason}\n"
+              "the second column below is therefore the degraded path.\n")
+    llm = pipeline.run(data_dir, OUT / seed / "ablation" / "with_adjudicator",
+                       adjudicator=adjudicator)
+
+    rows = [
+        ("explanation rate (bank credits)",
+         rules.metrics.explanation_rate_bank, llm.metrics.explanation_rate_bank),
+        ("settlement coverage",
+         rules.metrics.settlement_coverage, llm.metrics.settlement_coverage),
+        ("linkage precision",
+         rules.metrics.linkage_precision, llm.metrics.linkage_precision),
+        ("linkage recall",
+         rules.metrics.linkage_recall, llm.metrics.linkage_recall),
+    ]
+
+    lines = [
+        f"# Ablation — seed '{seed}'",
+        "",
+        "The same data, resolved twice. Tier is an attribute of an edge, so the tiered",
+        "breakdown inside each run is a group-by; this table is the end-to-end comparison.",
+        "",
+        "| Metric | rules only | + adjudicator |",
+        "|---|---|---|",
+    ]
+    for label, a, b in rows:
+        lines.append(f"| {label} | {format_bps(a.bps)} ({a.numerator}/{a.denominator}) "
+                     f"| {format_bps(b.bps)} ({b.numerator}/{b.denominator}) |")
+    lines += [
+        f"| journal entries posted | {len(rules.journal)} | {len(llm.journal)} |",
+        f"| statement foots | {'YES' if rules.statement.foots else 'NO'} "
+        f"| {'YES' if llm.statement.foots else 'NO'} |",
+        f"| adjudicator calls | {rules.llm.calls_attempted} | {llm.llm.calls_attempted} |",
+        f"| **blocked_hallucination** | {rules.llm.blocked_hallucination} "
+        f"| **{llm.llm.blocked_hallucination}** |",
+        f"| degraded | {rules.llm.degraded} | {llm.llm.degraded} |",
+        "",
+        "`blocked_hallucination` counts proposals the verifier rejected because the UTR",
+        "resolved to no known settlement. Linkage precision is the number to read beside",
+        "it: a rejected proposal must never move it.",
+        "",
+    ]
+    report = "\n".join(lines)
+    out = OUT / seed / "ablation.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report, encoding="utf-8", newline="\n")
+    print(report)
+    print(f"-> {out}")
+    return 0 if rules.ok and llm.ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,14 +202,23 @@ def main(argv: list[str] | None = None) -> int:
 
     runner = sub.add_parser("run", help="reconcile an already-generated seed")
     runner.add_argument("--seed", default=DEV_SEED)
+    runner.add_argument("--llm", action="store_true",
+                        help="enable the LLM adjudicator for unparsed narrations "
+                             "(needs ANTHROPIC_API_KEY and the [llm] extra)")
 
     demo = sub.add_parser("demo", help="generate + run + report, one command")
     demo.add_argument("--seed", default=DEV_SEED)
     demo.add_argument("--days", type=int, default=DEFAULT_DAYS)
+    demo.add_argument("--llm", action="store_true", help="enable the LLM adjudicator")
 
     ev = sub.add_parser(
         "eval", help="generate + run the HELD-OUT seed (different world, held-out narrations)")
     ev.add_argument("--days", type=int, default=DEFAULT_DAYS)
+    ev.add_argument("--llm", action="store_true", help="enable the LLM adjudicator")
+
+    abl = sub.add_parser("ablation",
+                         help="run a seed with and without the adjudicator, side by side")
+    abl.add_argument("--seed", default=EVAL_SEED)
 
     args = parser.parse_args(argv)
 
@@ -110,11 +226,13 @@ def main(argv: list[str] | None = None) -> int:
         _generate(args.seed, args.days, args.split)
         return 0
     if args.command == "run":
-        return _run(args.seed)
+        return _run(args.seed, args.llm)
     if args.command == "demo":
         _generate(args.seed, args.days)
         print()
-        return _run(args.seed)
+        return _run(args.seed, args.llm)
+    if args.command == "ablation":
+        return _ablation(args.seed)
     if args.command == "eval":
         print("HELD-OUT EVALUATION")
         print("The deterministic narration parser was written against the dev families "
@@ -122,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
               "deviation #4).\n")
         _generate(EVAL_SEED, args.days, SPLIT_EVAL)
         print()
-        return _run(EVAL_SEED)
+        return _run(EVAL_SEED, args.llm)
     return 2
 
 
