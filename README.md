@@ -38,7 +38,7 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 168 tests
+pytest                                              # 184 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
@@ -76,14 +76,15 @@ Four grains, each with its own denominator (`src/recon/domain/graph.py`, `EDGE_S
 |---|---|---|
 | **0** | Exact-key joins; §3.2 identities over the values the report *states*; flags, dates, cardinality | built |
 | **1** | Types the whole deduction stack against a contracted rate card; detects off-contract fees | built |
-| **2** | Subset-sum over candidates | **CUT** — see below |
+| **2** | Corroborates an unmatched credit on exact `(amount, value_date)` | built |
 | **3** | LLM extracts a UTR from a narration no parser was written for | built, fenced |
 
-Tier 2 is cut deliberately (PLAN.md, D-016). Increment 1 measured the residual as 100%
-typed-component-shaped with zero scatter, so there was nothing for a search to search — and building
-difficulty *in order to* give the LLM something to adjudicate is the §9 "agent as marketing"
-anti-pattern. The honest line is that arithmetic closes this loop, and the LLM earns its place only
-where deterministic parsing does not generalise.
+**Tier 2 is not subset-sum, and subset-sum stays cut** (D-016, D-027). Searching manufactured
+ambiguity *in order to* give the LLM something to adjudicate is the §9 "agent as marketing"
+anti-pattern. What Tier 2 does instead is exact: a credit links only when `(amount, value_date)`
+resolves to one settlement **and** that settlement is claimed by one credit. No tolerance, no
+scoring, every tie refused. It exists because an audit showed those two columns were already in
+memory and being ignored — see the ablation below.
 
 ---
 
@@ -126,6 +127,8 @@ false-clear rate           = injected breaks NOT flagged / injected breaks
   ...in remit              = missed breaks detectable at the built tier / those breaks
   ...out of remit          = missed breaks needing a higher tier      / those breaks
 exception typing accuracy  = correctly coded / breaks caught
+exception queue precision  = raised breaks that are real / raised breaks    <- the OTHER direction
+linkage precision by grain = per edge kind, because the aggregate is insensitive
 intrinsic clean rate       = units with no injected anomaly / all units   <- a property of the DATA
 decomposition closure      = settlements whose gross-to-net gap is fully typed, WITHOUT linkage
 narration parse rate       = credits whose UTR the regex extracted / all credits
@@ -157,43 +160,57 @@ narration templates the parser has never seen.
 
 | | dev | eval (held out) |
 |---|---|---|
-| **Explanation rate · settlement coverage** | **83.33%** (20/24) · **90.91%** (20/22) | 0.00% · 0.00% — *see below* |
+| **Explanation rate · settlement coverage** | **83.33%** (20/24) · **90.91%** (20/22) | **83.33%** (20/24) · **90.91%** (20/22) |
 | **Decomposition closure** *(no linkage, no ground truth)* | **100.00%** (22/22) | **100.00%** (22/22) |
-| **Linkage precision** | **100.00%** (3,388/3,388) | **100.00%** (3,488/3,488) |
-| Linkage recall | 99.97% | 99.40% |
+| **Linkage precision** | **100.00%** | **100.00%** (3,508/3,508) |
+| …at the bank grain *(the one an adjudicator can reach)* | **20/20** | **20/20** |
+| Linkage recall | 99.97% | 99.97% |
 | Exception detection recall | 100.00% (192/192) | 100.00% (184/184) |
 | **False-clear, in remit** | **0.00%** (0/192) | **0.00%** (0/184) |
-| Exception typing accuracy | 100.00% | 99.46% |
+| **Exception queue precision** *(raised breaks that are real)* | **94.61%** (193/204) | **92.89%** (183/197) |
+| Exception typing accuracy | 100.00% | 98.91% |
 | Intrinsic clean rate *(from ground truth)* | 89.12% | 89.46% |
 | Narration parse rate *(regex)* | 100.00% (24/24) | **8.33%** (2/24) |
-| Journal entries, all balanced | 20 | 0 |
+| Journal entries, all balanced | 20 | 20 |
 | Reconciliation statement | **foots to zero** | **foots to zero** |
-| Throughput | 3,327 records in ~240 ms | 3,435 in ~240 ms |
+
+**Queue precision is published because its absence hid a real defect.** The suite measured false
+clear — what we missed — with genuine rigour, and never measured what we *raised* that was not real.
+Under that blind spot the held-out queue reported 22 settlements as missing when 21 of those credits
+were in the bank file. Both directions are now published, per seed and per code (D-030, F-014).
 
 ### The ablation — what each tier is actually worth
 
-| Tier | dev | eval |
+| Cumulative | dev | eval (held out) |
 |---|---|---|
-| Tier 0 alone | **0.00%** (0/24) | 0.00% |
-| + Tier 1 | **83.33%** (20/24) | 0.00% |
-| + Tier 3 (LLM) | — *(no unparsed narrations to work on)* | **12.50–20.83%** |
+| T0 · narration join | **0.00%** (0/24) | 0.00% (0/24) |
+| + T1 · arithmetic | **83.33%** (20/24) | 0.00% (0/24) |
+| + T2 · (amount, date) corroboration | 83.33% | **83.33%** (20/24) |
+| + T3 · LLM | 83.33% | **83.33% — adds nothing** |
 
 **Tier 0 alone explains nothing on realistic data.** It finds the counterparty and proves the report
 is internally consistent — worth having — but on a merchant with a rolling reserve it cannot explain a
 single rupee of the gross-to-cash gap. The brief's thesis, that explaining the amount is the job, is a
 measured number here rather than a claim.
 
-The four dev credits that remain unexplained are not decomposition failures: they are two credits with
-no settlement behind them and a duplicate-UTR pair the resolver **deliberately declines to link**.
-Every settlement Tier 1 could reach, it closed.
+The four unexplained credits on each seed are not decomposition failures: two credits with no
+settlement behind them, and a duplicate-UTR pair the resolver **deliberately declines to link**. Every
+settlement the tiers could reach, they closed.
 
-### Eval explanation is 0%, and it is not an arithmetic failure
+**The bottom row is the important one.** On the held-out seed, deterministic corroboration does all
+of it and the LLM adds zero — see below.
 
-On the held-out seed the regex extracts nothing, so no bank edge is created and Tier 1 never runs.
-That is why **decomposition closure** exists as a separate measurement: it asks whether the
-gross-to-net gap can be typed using the settlement report alone — no bank statement, no narration, no
-ground truth. It is **100% on both seeds**. The held-out failure is localised entirely to narration
-parsing.
+### The held-out seed used to report 0%, and that was our bug
+
+The regex extracts nothing there, so Tier 0 created no bank edge and the whole eval result was 0%.
+An adversarial audit showed why that was not a data problem: `(amount, value_date)` resolves 20 of 24
+held-out credits to exactly one settlement, using two columns the resolver had already loaded and
+declined to read. Tier 2 now reads them, and eval matches dev.
+
+**Decomposition closure** remains published as a separate measurement — it asks whether the
+gross-to-net gap can be typed from the settlement report alone, with no linkage at all — and it is
+**100% on both seeds**. It is what let us tell an arithmetic failure from a linkage failure while the
+linkage was broken.
 
 ### What Tier 1's 100% does and does not prove
 
@@ -218,42 +235,55 @@ residual, never touches an amount.
 Every proposal is re-verified by **exact lookup**. A UTR either resolves to a known settlement or it
 does not; there is no "close enough" and no scoring step a confident wrong answer can win.
 
-### We ran it three times, and the answer changed
+### What it adds over the deterministic tiers: nothing
 
-| | run 1 | run 2 | run 3 |
-|---|---|---|---|
-| Correct and verified | 5 / 22 | 3 / 22 | 4 / 22 |
-| `blocked_hallucination` | 3 | 5 | 4 |
-| `blocked_unverifiable` | **14** | **14** | **14** |
-| **Linkage precision** | **100.00%** | **100.00%** | **100.00%** |
-| Statement foots | YES | YES | YES |
+Measured live, post-audit. Tier 2 places 20 of the 22 credits first, so the adjudicator is asked
+**2 questions instead of 22** — and the explanation rate does not move.
 
-Same 22 narrations, same prompt, same model (`claude-haiku-4-5`). We got 5, published it, re-ran to
-make the artifacts match, got 3, ran a third and got 4.
+| | rules only | + adjudicator |
+|---|---|---|
+| Explanation rate | 83.33% (20/24) | **83.33% (20/24)** |
+| Linkage precision | 100.00% | 100.00% |
+| Adjudicator calls | 0 | **2** |
+| `blocked_hallucination` | 0 | 0 |
+| Journal entries | 20 | 20 |
 
-**We report the range: 3–5 of 22 overall, 38–62% on recoverable data.** Quoting 62% alone would be
-quoting the better sample.
+**This is a better result than the one it replaces, not a worse one.** We went looking for the LLM's
+job, found a deterministic rule that does it better on our own data, published the comparison, and cut
+the model back to the residue nothing else could place — where it also added nothing.
 
-And underneath a model swinging 24 points, **linkage precision was 100.00% in all three runs.** The
-fence never moved. The LLM is *allowed* to be unreliable, because nothing it proposes reaches the
-ledger without a verification it cannot talk its way past.
+Before Tier 2 existed, three live runs on all 22 narrations returned 5, then 3, then 4 correct — and
+we reported the range rather than the best sample. That run is preserved in
+[RUN_LOG.md](RUN_LOG.md); its denominator was inflated by the same defect Tier 2 fixed, so the figure
+to quote today is the one above: **zero contribution over the deterministic tiers on this data.**
+
+Through all of it, at the grain an adjudicator can actually reach, **linkage precision stayed
+100.00%** — including under a hostile adjudicator returning 22 plausible wrong UTRs, all blocked.
 
 ### Two rejection counters, because they are two different events
 
-The first live run reported 17 "hallucinations". Fourteen of them were the model being **right**: the
-`neft_truncated` family cuts the narration at 40 characters, and only 10 of the 16 UTR characters
-survive in the source at all. The model returned exactly what was there.
+The first live run reported 17 "hallucinations". Fourteen were the model being **right** about a
+narration that genuinely truncates the UTR at 40 characters — it returned exactly what was there.
 
 ```
 narration : NEFT-RAZORPAYSOFTWAREPVTLT-UTR1487099871
 true utr  : 14870998713daxoq
-proposed  : 1487099871          <- exactly what the document contains
+proposed  : 1487099871          <- exactly what the narration contains
 ```
 
 Rejecting it was still correct — an unverifiable reference must never become a link — but calling it a
 hallucination overstated model error roughly fivefold. **"The model was wrong" and "the answer was not
-recoverable" are different findings**, and the system now separates them. It is the same judgment
-Tier 0 already applies to a duplicated UTR, one level sharper.
+recoverable" are different findings**, and the system separates them (D-025).
+
+> **Correction, 01 Sep.** We also claimed those UTRs were unrecoverable *by any tier*. That was false
+> as shipped: every bank row carried the full UTR in its own primary key, `bc_<utr>`, one field from
+> the narration it was supposedly absent from. `bank_ref` is now a CRC, so the sentence is true — and
+> a third source of recovery, `(amount, value_date)`, turned out to place 20 of the 22 anyway.
+> (D-029, F-013.)
+
+An **empty** answer is also not a hallucination: the prompt tells the model an empty string is correct
+when no UTR is present, so abstention counts as unverifiable. Found when a *perfect oracle* scored a
+hallucination.
 
 ### Determinism, and where it stops
 

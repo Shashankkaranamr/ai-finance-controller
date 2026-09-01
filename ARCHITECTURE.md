@@ -14,7 +14,7 @@ pip install -e ".[dev]"          # pydantic + pytest, nothing else
 python -m recon demo             # dev seed, ~50 s from a cold clone
 python -m recon eval             # the held-out seed
 python -m recon ablation --seed eval
-pytest                           # 168 tests
+pytest                           # 184 tests
 ```
 
 No network, no API key, no `make`, no `uv`. The LLM is opt-in (`--llm`).
@@ -90,16 +90,17 @@ produced by re-running can drift from the run it describes; this one cannot.
 |---|---|---|
 | **0** | Exact-key joins; §3.2 identities over values the report *states*; flags, dates, cardinality | Reads reported `fee`/`tax`. Cannot say you were overcharged. |
 | **1** | Types the whole §3.3 deduction stack against a contracted rate card; detects off-contract fees | First tier with a *second, independent opinion* (`domain/rates.py`). |
-| **2** | Subset-sum over candidates | **CUT** (D-016) |
+| **2** | Corroborates an unmatched credit on exact `(amount, value_date)`; refuses every tie | Deterministic, not fuzzy. Subset-sum stays cut (D-016, D-027). |
 | **3** | Extracts a UTR from a narration no parser was written for | Proposes linkage only. Never touches money. |
 
 ### The ablation
 
 | Cumulative | dev | eval (held out) |
 |---|---|---|
-| Tier 0 alone | **0.00%** (0/24) | 0.00% |
-| + Tier 1 | **83.33%** (20/24) | 0.00% |
-| + Tier 3 | — *(nothing unparsed to work on)* | **12.50–20.83%** |
+| T0 · narration join | **0.00%** (0/24) | 0.00% (0/24) |
+| + T1 · arithmetic | **83.33%** (20/24) | 0.00% (0/24) |
+| + T2 · (amount, date) corroboration | 83.33% | **83.33%** (20/24) |
+| + T3 · LLM | 83.33% | **83.33% — adds nothing** |
 
 **Tier 0 alone explains nothing on realistic data.** It finds the counterparty and proves the report
 is internally consistent — genuinely useful — but on a merchant with a rolling reserve it explains not
@@ -176,28 +177,31 @@ matters at the gate.**
 
 `test_a_correctly_read_but_ambiguous_utr_is_still_refused`
 
-### Finding 3 — three live runs disagreed, and we published the range
+### Finding 3 — the LLM adds nothing over the deterministic tiers, and we published that
 
-Same 22 held-out narrations, same prompt, same model (`claude-haiku-4-5`):
+Measured live, post-audit, with Tier 2 in place:
 
-| | run 1 | run 2 | run 3 |
-|---|---|---|---|
-| Correct and verified | 5/22 | 3/22 | 4/22 |
-| `blocked_hallucination` | 3 | 5 | 4 |
-| `blocked_unverifiable` | **14** | **14** | **14** |
-| **Linkage precision** | **100.00%** | **100.00%** | **100.00%** |
+| | rules only | + adjudicator |
+|---|---|---|
+| Explanation rate (eval) | 83.33% (20/24) | **83.33% (20/24)** |
+| Adjudicator calls | 0 | **2** |
+| `blocked_hallucination` | 0 | 0 |
+| Linkage precision, bank grain | 20/20 | 20/20 |
 
-**We report 3–5 of 22 — 38–62% on recoverable data. Quoting 62% alone would be quoting the better
-sample.**
+Corroboration places 20 of 22 credits first, so the model is asked **2 questions instead of 22**, and
+moves the result by **zero**.
 
-The 14 are identical every run because those narrations have the UTR *physically cut out* at 40
-characters; the model returns exactly what is there and is **right**. Calling that a hallucination
-overstated model error roughly fivefold, so the counter was split (D-025) — same judgment as Finding 2,
-one level along. The discriminator works from the narration alone and is deliberately biased toward
-blaming the model.
+**That is the stronger claim, not the weaker one.** We looked for the LLM's job, found a deterministic
+rule that does it better on our own data, published the comparison, and cut the model to the residue.
 
-**Underneath a model swinging 24 points, precision did not move once.** The LLM is *allowed* to be
-unreliable. That is the design.
+*Before* Tier 2 existed, three runs over all 22 narrations returned 5, 3 and 4 correct, and we
+published the range rather than the best sample — *quoting 62% alone would be quoting the better
+sample*. That discipline stands and the run is preserved in RUN_LOG.md. Its denominator, however, was
+inflated by the defect Tier 2 fixed, so it is history rather than the headline.
+
+**What did not move, through any of it:** linkage precision at the bank grain, 100.00%, including
+under a hostile adjudicator returning 22 plausible wrong UTRs — all blocked. The LLM is *allowed* to
+be unreliable. That is the design.
 
 ### Where determinism stops
 
@@ -213,7 +217,7 @@ Not oversights. Each is a dated decision recording what it ruled out.
 
 | Absent | Why | Decision |
 |---|---|---|
-| **Tier 2 (subset-sum)** | Increment 1 measured the residual as 100% typed with **zero scatter** — nothing for a search to search. Building difficulty *to justify* the LLM is the §9 anti-pattern. | D-016 |
+| **Subset-sum search** | Increment 1 measured the residual as 100% typed with **zero scatter** — nothing for a search to search. Building difficulty *to justify* the LLM is the §9 anti-pattern. Tier 2 now exists, but as exact corroboration, not search. | D-016, D-027 |
 | **Multi-gateway collision** | Held as the ambiguity "lever" from 25 Aug, then cut outright rather than manufacture difficulty. | D-016 |
 | **Second merchant scenario** | Doubles generator surface, produces no new *break shape*; a card-heavy merchant's difficulty fits inside one merchant's method mix. | D-011 |
 | **FX / international** | A second currency threaded through the money type, to buy one exception code. | D-011 |
@@ -224,6 +228,29 @@ Not oversights. Each is a dated decision recording what it ruled out.
 The taxonomy is disciplined the same way: `CHARGEBACK_FEE_UNBOOKED` and `PARTIAL_SETTLEMENT` were
 **removed** from `ExceptionType` because the generator cannot honestly produce them (D-013). A
 taxonomy entry with no data behind it is a claim we cannot back.
+
+### What the simulator makes easier than reality
+
+Stated because a reviewer will find it, and because Tier 2's result depends on it:
+
+**`(amount, value_date)` is a clean key here, and would not be in the field.** `derive_bank` copies the
+settlement's amount and date straight through, and a 4-day cycle gives one settlement per date. A real
+bank nets its charges out of the credit, batches across dates, and a real merchant settles daily or
+more often — all of which break the uniqueness Tier 2 depends on. Corroboration is a genuine technique
+a real deployment would use as *evidence*; its strength on this data is partly a property of the
+simulator.
+
+**The settlement cadence is unrealistically clean**: one settlement per 4 days, each on its own date,
+all `status: processed`, no failed or reversed settlements, no same-day multiples.
+
+**The UTR format is invented.** `[0-9]{10}[a-z0-9]{6}` matches no real Indian instrument — NEFT UTRs
+carry a bank prefix, UPI RRNs are 12 digits. The adjudicator's prompt is given that spec, so the model
+is told our format rather than having to infer a real one.
+
+**Three §3.2 identities cannot currently fail.** `settlement.amount` is computed from the same line
+items it is later checked against on the reporting side, and the bank credit is copied from it, so
+rollup and tie-out hold by construction rather than by verification. Injecting a short credit and a
+stale total would make them mean something — the highest-value remaining generator work.
 
 ---
 

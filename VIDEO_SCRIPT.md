@@ -1,5 +1,27 @@
 # Video script — 5:00 hard cap
 
+> # ⚠ STALE — DO NOT FILM FROM THIS YET
+>
+> An adversarial audit on **01 Sep** found three load-bearing false claims in the shipped docs. Six
+> fixes landed the same day and **moved numbers this script quotes**. The beats below are flagged
+> inline with **[STALE]**; the underlying structure and timings are unaffected.
+>
+> **Left for you to rewrite — deliberately not auto-edited**, because these are the beats whose
+> *argument* changed, not just their digits:
+>
+> | Block | What changed |
+> |---|---|
+> | 1:15–2:45 | The drill-down exception. The old top-of-queue entry was a **false alarm** — a settlement reported missing whose credit was in the bank file. Figures are also stale (it says "Rs 1,63,318, processed 13 June"; the current top entry differs). |
+> | 2:45–3:30 | The ablation, and the pull-quote. eval is no longer 0% and the LLM no longer adds 3–5 of 22 — **it adds zero** over deterministic corroboration. The "quoting 62% would be quoting the better sample" discipline still stands, but it now describes a superseded run. |
+> | 4:20–5:00 | The "UTR physically cut out" beat. That claim was **false as shipped** — every bank row carried the full UTR in its own primary key. It is true now (`bank_ref` is a CRC), but "no tier recovers those" is still wrong: `(amount, value_date)` recovers 20 of 22. |
+>
+> Current numbers: [RUN_LOG.md](RUN_LOG.md) → *Adversarial audit — six fixes*. The story is
+> **stronger**, not weaker: we found a deterministic rule that beat the LLM on our own data,
+> published the comparison, and cut the model to the residue.
+>
+> Blocks 0:00–0:35, 0:35–1:15 and 3:30–4:20 (the network kill) are **unaffected** and can be filmed
+> as written.
+
 Follows BRIEF §11's block structure. Narration is written to be **spoken** at ~140 wpm.
 
 **Budget: 620 spoken words ≈ 4:25, leaving ~35 s for the live run, the network kill and pauses.**
@@ -53,7 +75,11 @@ next block's visual.
 
 ---
 
-## 1:15–2:45 · Live run on the held-out batch, and one exception · *136 words*
+## 1:15–2:45 · Live run on the held-out batch, and one exception · *136 words* · **[STALE]**
+
+> **[STALE]** The exception drilled into below was a false alarm, and the figures have moved. The
+> beat still works — pick the current top-of-queue entry from `out/eval/exceptions.jsonl` — but the
+> narration needs rewriting against a real one.
 
 **Run `python -m recon eval` on camera. Let it breathe — the run is ~1 s, the reading is the content.**
 
@@ -79,7 +105,12 @@ next block's visual.
 
 ---
 
-## 2:45–3:30 · The ablation · *127 words*
+## 2:45–3:30 · The ablation · *127 words* · **[STALE — argument changed]**
+
+> **[STALE]** eval is no longer 0%, and the LLM's contribution is no longer 3–5 of 22 — it is
+> **zero** over deterministic corroboration, which now carries the held-out seed at 83.33%. The
+> range discipline stands but describes a superseded run. This is the beat that most needs your
+> hand: the new story is *stronger*.
 
 > **Tier 0 alone explains zero percent of bank credits on realistic data.** That's the finding, not a
 > regression — it knows nothing about a rolling reserve.
@@ -133,7 +164,12 @@ Around call 8–10 (~20 s in), **disable the network adapter on camera.** Don't 
 
 ---
 
-## 4:20–5:00 · The honest exception list · *115 words*
+## 4:20–5:00 · The honest exception list · *115 words* · **[STALE in part]**
+
+> **[STALE]** The `REFUND_ORPHANED` blind spot is unchanged and still true. The "fourteen of
+> twenty-two have the UTR physically cut out" beat is not: it was false as shipped, is true now
+> after the `bank_ref` fix, but "no tier recovers those" remains wrong — corroboration recovers 20
+> of 22 without reading the narration at all.
 
 > The queue separates **breaks** from **explained-but-notable**. A withheld reserve isn't a break —
 > it's a receivable. Conflating them inflates your exception count.
@@ -155,7 +191,8 @@ Around call 8–10 (~20 s in), **disable the network adapter on camera.** Don't 
 
 ## Pre-flight checklist
 
-- [ ] `pytest` green (168) on the machine being filmed
+- [ ] `pytest` green (**184**) on the machine being filmed
+- [ ] **Every [STALE] beat rewritten against current numbers** — see the banner
 - [ ] `demo` and `eval` both clean from a fresh clone
 - [ ] **Rehearse the network kill** — confirm ~20 s lands mid-batch
 - [ ] Terminal font large enough to read queue entries
