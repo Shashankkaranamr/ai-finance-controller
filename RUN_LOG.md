@@ -618,9 +618,65 @@ Improving it against results from the eval seed would make the ablation measure 
 than the model. If it is worth improving, that happens against `dev` narrations, as a separate dated
 decision, and is then re-measured here.
 
+### Addendum, 01 Sep 2026 — the counter split, and a second run that changed the answer
+
+`blocked_hallucination` was split into two counters (D-025). Then the live run was repeated so the
+artifacts would match the claim, and **the second run returned a different answer**.
+
+| | run 1 | run 2 |
+|---|---|---|
+| Correct and verified | **5 / 22** | **3 / 22** |
+| `blocked_hallucination` (invented, or under-read available characters) | 3 | 5 |
+| `blocked_unverifiable` (read it right; document has no usable reference) | **14** | **14** |
+| Explanation rate | 20.83% (5/24) | 12.50% (3/24) |
+| **Linkage precision** | **100.00%** | **100.00%** |
+| Statement foots | YES | YES |
+
+*(Run 1's split is the recorded proposals replayed through the new discriminator, since the code at
+the time had only one counter. Run 2 is the code computing it live.)*
+
+**The 14 are stable; all the variance is in the other 8.** That is the useful shape of this result.
+The `neft_truncated` family is 0/14 in both runs because the UTR is physically absent from the
+narration — no sampling changes that. The `rtgs_no_delimiter` family, where the UTR *is* present,
+went 5-correct then 3-correct out of 8.
+
+**So the honest headline is a range, not a number: 3–5 of 22 overall, 3–5 of 8 on recoverable data
+(38–62%), across two runs.** Quoting 62% alone would be quoting the better of two samples, which is
+exactly the cherry-picking §7 warns about.
+
+### This breaks determinism, and the invariant needs its boundary stated
+
+Invariant 2 says same seed ⇒ byte-identical `metrics.json`. That holds for the **shipped default**
+(rules-only) and for any deterministic adjudicator — both are covered by tests. It does **not** hold
+with a live LLM: the response cache is per-run, so a second run re-asks and can get different
+answers. Measured here, not theorised.
+
+The fix, if we want it, is to persist the cache across runs keyed by the narration hash. Not built —
+see D-026 — because the deterministic core is what the demo runs and what the gates measure, and
+Increment 6 is protected. What matters is that the boundary is stated rather than discovered by a
+reviewer.
+
+### What did NOT vary
+
+Precision, both runs: **100.00%**. Statement foots, both runs. Journal entries posted only for
+verified links. Every wrong proposal rejected, twice, with the model varying underneath. **The fence
+is the part that does not move**, and that is the claim worth making — not the extraction rate.
+
 ### Open question for review
 
-Should `blocked_hallucination` split into `blocked_hallucination` (3) and
-`blocked_unverifiable` (14)? The argument for is that the current number is wrong in a way that
-misrepresents both the model and the fence. The argument for waiting is that it moves a figure likely
-to appear in the video. **Not changed pending sign-off.**
+~~Should `blocked_hallucination` split?~~ **Approved and done, 01 Sep 2026 — see D-025 and the
+addendum above.**
+
+### FLAGGED FOR THE INCREMENT 6 VIDEO SCRIPT
+
+This is the sharpest result in the project and the narrative must survive into the video intact:
+
+1. **100% linkage precision held under a real adversarial model, twice**, while the model's own
+   accuracy varied from 5/22 to 3/22 underneath it. The fence is the invariant, not the model.
+2. **The system distinguished "the model was wrong" (3–5) from "the answer was not recoverable"
+   (14).** That is the same judgment Tier 0 already applies to a duplicated UTR (D-014, D-023),
+   sharpened one level: an unverifiable reference is refused *and* correctly not blamed on the model.
+3. **62% on recoverable data is a range, 38–62%, over two runs.** Quote the range. Quoting 62% is
+   quoting the better sample.
+4. The honest framing: *we gave the LLM the one job it is suited for, on the smallest model that
+   does it, and then measured it against an adversary and against itself.*

@@ -112,7 +112,18 @@ class LLMStats:
     calls_attempted: int = 0
     calls_declined: int = 0
     cache_hits: int = 0
+    # Two counters, because they are two different events and one number was
+    # actively misleading. See D-025.
+    #
+    #   blocked_hallucination -- the model returned characters that are NOT in the
+    #       narration. It invented a reference. This is the number the fence exists
+    #       for, and the one worth quoting.
+    #   blocked_unverifiable  -- the model returned text that IS in the narration,
+    #       and that text resolves to no known settlement. The extraction was
+    #       correct; the document does not contain a usable reference. Rejecting is
+    #       still right, but it is not a model error and must not be counted as one.
     blocked_hallucination: int = 0
+    blocked_unverifiable: int = 0
     degraded: bool = True
     degraded_reason: str = ""
 
@@ -123,6 +134,7 @@ class LLMStats:
             "calls_declined": self.calls_declined,
             "cache_hits": self.cache_hits,
             "blocked_hallucination": self.blocked_hallucination,
+            "blocked_unverifiable": self.blocked_unverifiable,
             "degraded": self.degraded,
             "degraded_reason": self.degraded_reason,
         }

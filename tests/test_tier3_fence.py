@@ -431,3 +431,49 @@ def test_a_fenced_json_response_is_parsed(raw):
     from recon.llm.anthropic_client import _unfence
 
     assert _json.loads(_unfence(raw))["utr"] == "abc"
+
+
+@pytest.mark.parametrize("proposed,narration,faithful,why", [
+    ("1487099871", "NEFT-RAZORPAYSOFTWAREPVTLT-UTR1487099871", True,
+     "bank truncated the UTR out of the statement; nothing more was available"),
+    ("8688029388", "RTGS CR RAZORPAY86880293883lndnrSETTLEMENT", False,
+     "stopped short of characters that were plainly there"),
+    ("1341132778n0utj", "RTGS CR RAZORPAY13411327780n0utjSETTLEMENT", False,
+     "invented: those characters are not in the text"),
+    ("9999999999zzzzzz", "NEFT CR-ACME DISTRIBUTORS-9999999999zzzzzz-VENDORPAY", True,
+     "read a delimited reference correctly; it just is not one of our settlements"),
+])
+def test_faithful_reading_separates_model_error_from_missing_evidence(
+        proposed, narration, faithful, why):
+    """The discriminator behind the two rejection counters (D-025).
+
+    All four cases are drawn from the real live run. It must work from the
+    narration alone -- the resolver never knows the true UTR, which is the entire
+    point of it being a resolver.
+
+    The second case is the one a naive substring check gets wrong: a prefix of a
+    present token is trivially "present", so "did the proposal appear in the text"
+    would call a genuine under-read "the document had no reference", which
+    flatters us.
+
+    Note the precondition -- this only runs on proposals that already FAILED the
+    lookup. A correct extraction never reaches it. That matters, because on a
+    delimiter-free narration even a correct UTR is followed by more alphanumerics
+    and would be judged unfaithful here; the heuristic is biased toward blaming
+    the model, which is the safe direction for a published number.
+    """
+    from recon.resolve.tier3 import _is_faithful_reading
+
+    assert _is_faithful_reading(proposed, narration) is faithful, why
+
+
+def test_both_rejection_counters_still_reject(generated_eval, tmp_path):
+    """Splitting the counter must not soften the fence. Unverifiable is still
+    refused -- an unverifiable reference never becomes a link."""
+    result = pipeline.run(generated_eval, tmp_path / "split",
+                          adjudicator=HostileAdjudicator())
+    total_blocked = (result.llm.blocked_hallucination
+                     + result.llm.blocked_unverifiable)
+    assert total_blocked > 0
+    assert not [e for e in result.edges if e.established_by is Tier.T3_LLM]
+    assert result.metrics.linkage_precision.bps == 10_000

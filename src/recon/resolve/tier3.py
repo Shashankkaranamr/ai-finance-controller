@@ -56,6 +56,47 @@ from ..report.exceptions import ExceptionRecord
 JOB_PARSE_NARRATION = "parse_narration"
 
 
+def _is_faithful_reading(proposed: str, narration: str) -> bool:
+    """Did the model read the document, or fill in characters that were not there?
+
+    This is the discriminator behind the two rejection counters (D-025), and it
+    has to work from the narration alone -- the resolver never knows the true UTR,
+    which is the whole point of it being a resolver.
+
+    Two ways a proposal can be unfaithful, and the second one is easy to miss:
+
+      1. The characters are simply not in the narration. Invented.
+      2. The characters ARE in the narration, but the model stopped short of more
+         characters that were plainly available -- it returned a prefix of a longer
+         run. That is still the model getting it wrong with the evidence in front
+         of it, and counting it as "the document had no reference" would flatter us.
+
+    So a reading is faithful only if the proposal appears AND runs to the end of
+    its alphanumeric run. That distinguishes "the bank truncated the UTR out of the
+    statement" (nothing more was available) from "the model under-read a UTR that
+    was fully present".
+
+    PRECONDITION: only ever called on a proposal that ALREADY failed the exact
+    lookup. A correct extraction never reaches here -- it resolved and was
+    accepted -- which matters, because on a delimiter-free narration
+    (`...RAZORPAY<utr>SETTLEMENT`) even a perfectly correct UTR is followed by
+    more alphanumerics, and this function would call it unfaithful.
+
+    It is a heuristic, and it is deliberately biased AGAINST us: on that same
+    delimiter-free family it will tend to call a genuinely-unavailable reference a
+    model error rather than the reverse. A rejection counter that errs toward
+    blaming the model is the safe direction for a number we intend to publish.
+    """
+    low = narration.lower()
+    at = low.find(proposed)
+    if at < 0:
+        return False                       # invented
+    after = at + len(proposed)
+    if after < len(low) and low[after].isalnum():
+        return False                       # stopped short of available characters
+    return True
+
+
 def resolve(repo: Repository, edges: list[ReconEdge],
             exceptions: list[ExceptionRecord], adjudicator: Adjudicator,
             cache: ResponseCache, stats: LLMStats,
@@ -126,9 +167,28 @@ def resolve(repo: Repository, edges: list[ReconEdge],
         # THE VERIFIER GATE. An exact lookup, with no tolerance and no scoring.
         settlement = settlement_by_utr.get(proposed) if proposed else None
         if settlement is None:
-            stats.blocked_hallucination += 1
-            audit.record("blocked_hallucination", bank_credit=bank_ref,
+            # WHY the proposal failed matters, and one counter conflated two very
+            # different events (D-025). The discriminator is whether the proposed
+            # string is actually IN the narration:
+            #
+            #   present  -> the model read the document correctly and the document
+            #               has no usable reference (a bank truncated it, or the
+            #               credit is a third party's). Not a model error.
+            #   absent   -> the model produced characters that are not there. That
+            #               is a hallucination, and it is what the fence is for.
+            #
+            # Both are rejected either way: an unverifiable reference must never
+            # become a link. Only the accounting differs.
+            faithful = bool(proposed) and _is_faithful_reading(proposed, credit.narration)
+            if not faithful:
+                stats.blocked_hallucination += 1
+                event = "blocked_hallucination"
+            else:
+                stats.blocked_unverifiable += 1
+                event = "blocked_unverifiable"
+            audit.record(event, bank_credit=bank_ref,
                          proposed=proposed[:64],
+                         narration=credit.narration[:120],
                          rationale=result.rationale[:160])
             continue
 
@@ -200,5 +260,7 @@ def resolve(repo: Repository, edges: list[ReconEdge],
 
     edges.sort(key=lambda e: e.sort_key())
     audit.record("tier3_complete", proposals=stats.calls_attempted,
-                 accepted=len(accepted), blocked=stats.blocked_hallucination)
+                 accepted=len(accepted),
+                 blocked_hallucination=stats.blocked_hallucination,
+                 blocked_unverifiable=stats.blocked_unverifiable)
     return edges, exceptions

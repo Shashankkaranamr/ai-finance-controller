@@ -171,13 +171,19 @@ def _ablation(seed: str) -> int:
         f"| statement foots | {'YES' if rules.statement.foots else 'NO'} "
         f"| {'YES' if llm.statement.foots else 'NO'} |",
         f"| adjudicator calls | {rules.llm.calls_attempted} | {llm.llm.calls_attempted} |",
-        f"| **blocked_hallucination** | {rules.llm.blocked_hallucination} "
-        f"| **{llm.llm.blocked_hallucination}** |",
+        f"| **blocked_hallucination** (invented a reference) | "
+        f"{rules.llm.blocked_hallucination} | **{llm.llm.blocked_hallucination}** |",
+        f"| blocked_unverifiable (read it right; no usable reference) | "
+        f"{rules.llm.blocked_unverifiable} | {llm.llm.blocked_unverifiable} |",
         f"| degraded | {rules.llm.degraded} | {llm.llm.degraded} |",
         "",
-        "`blocked_hallucination` counts proposals the verifier rejected because the UTR",
-        "resolved to no known settlement. Linkage precision is the number to read beside",
-        "it: a rejected proposal must never move it.",
+        "Both counters are rejections -- an unverifiable reference never becomes a link.",
+        "They are split because they are different events: `blocked_hallucination` means",
+        "the model produced characters that are not in the narration, and",
+        "`blocked_unverifiable` means it read the document correctly and the document has",
+        "no usable reference in it (a bank truncated the UTR, or the credit is a third",
+        "party's). Only the first is a model error. Linkage precision is the number to",
+        "read beside both: a rejected proposal must never move it.",
         "",
     ]
     report = "\n".join(lines)

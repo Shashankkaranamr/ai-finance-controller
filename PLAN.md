@@ -859,3 +859,36 @@ claim to a slightly stronger one, not fixing anything wrong.
 **What it rules out:** Any "validated across contracts" phrasing, permanently, unless the seed is
 actually built. Reopens only if Increment 6 finishes with real time to spare, and the default is no.
 **Supersedes:** — (closes the open option flagged in D-019)
+
+### D-025 · Increment 3 · 2026-09-01 · Two rejection counters, because they are two events
+**Decision:** `blocked_hallucination` (the model produced characters not faithfully read from the
+narration — invented, or under-read when more were available) and `blocked_unverifiable` (it read the
+document correctly and the document contains no usable reference). Both are still rejected; only the
+accounting differs. Discriminated by `_is_faithful_reading`, from the narration alone.
+**Why:** The first live run reported 17 hallucinations. Fourteen of them were the model returning
+exactly the text that was present — the `neft_truncated` family cuts the narration at 40 characters
+and only 10 of the 16 UTR characters survive. That is `REFUND_ORPHANED`'s shape, evidence outside the
+extract, and calling it a hallucination overstated model error roughly fivefold. The same distinction
+Tier 0 already draws for a duplicated UTR (D-014, D-023), one level along.
+**What it rules out:** Publishing a single rejection count. Also rules out the naive discriminator
+"did the proposal appear in the narration" — a prefix of a present token is trivially present, so
+that version scored a genuine under-read as unverifiable, which flatters us. The heuristic is
+deliberately biased toward blaming the model instead.
+**Supersedes:** — **Approved by the user, 01 Sep 2026.**
+
+### D-026 · Increment 3 · 2026-09-01 · Determinism holds for the deterministic core, not the LLM layer
+**Decision:** State invariant 2's boundary explicitly: same seed ⇒ byte-identical `metrics.json` for
+the shipped rules-only path and for any deterministic adjudicator, both covered by tests. With a live
+LLM it does not hold, because the response cache is per-run. Do **not** build cross-run cache
+persistence now. Report the LLM figure as a **range over runs**, never a single number.
+**Why:** Measured, not predicted: two identical live runs returned 5/22 and 3/22. The stable part is
+the 14 structurally-unrecoverable narrations; all variance sits in the 8 where the UTR is present.
+Persisting the cache would restore reproducibility and costs perhaps 30–45 minutes, but the demo and
+every gate run the deterministic core, Increment 6 is protected, and two engine days remain. A stated
+boundary is worth more than a hidden one.
+**What it rules out:** Quoting 62% (or any single figure) for LLM accuracy — the range is 38–62% over
+two runs. Also rules out claiming byte-identical runs with `--llm` enabled.
+**Supersedes:** the no-number clause of **D-022**, which required an API key to resolve and now has
+measured figures. D-022's other half — that the SDK stays an optional extra — stands unchanged.
+**Approved in principle by the user (split + supersession); the range framing is new and open for
+review.**
