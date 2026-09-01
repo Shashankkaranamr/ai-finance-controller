@@ -309,7 +309,16 @@ def _check_line_flags(repo, exceptions, audit) -> None:
                                    (f"line_item:{entity_id}",)),)))
 
         # A dispute reversal that cannot reach the sale it reverses.
-        if line.dispute_id is not None and line.order_id is None and line.credit == 0:
+        #
+        # `payment_id is not None` is the whole discriminator, and leaving it out
+        # was a false alarm aimed at a human (F-012). A dispute produces TWO lines:
+        # the reversal, which carries the payment_id of the capture being reversed,
+        # and a flat per-dispute fee, which carries none because it reverses
+        # nothing. Without this clause every fee line was reported to an analyst as
+        # "The reversal is real; the reference is missing" -- a sentence that is
+        # simply false about a fee. 12 of 17 dev alarms were fee lines.
+        if (line.dispute_id is not None and line.order_id is None
+                and line.credit == 0 and line.payment_id is not None):
             exceptions.append(ExceptionRecord.build(
                 ExceptionType.CHARGEBACK_UNLINKED, SUBJECT_UNIT, entity_id,
                 Paise(line.amount),

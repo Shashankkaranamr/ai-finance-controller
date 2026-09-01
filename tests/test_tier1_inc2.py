@@ -206,3 +206,29 @@ def test_the_ablation_falls_out_of_the_edge_tier_attribute(result):
     assert Tier.T0_DETERMINISTIC.name in by_tier
     assert Tier.T1_ARITHMETIC.name in by_tier
     assert BUILT_TIER == 1
+
+
+def test_a_chargeback_fee_is_not_reported_as_an_unlinked_reversal(result, generated):
+    """FIX-1 / F-012. A dispute emits two lines and only one is a reversal.
+
+    The flat per-dispute fee carries no `payment_id` because it reverses nothing.
+    Flagging it CHARGEBACK_UNLINKED told an analyst "the reversal is real; the
+    reference is missing" about a Rs 1,500 fee — false, and aimed at a human.
+
+    Asserted against ground truth rather than a count, so it cannot pass by the
+    alarm simply becoming rarer.
+    """
+    truth = GroundTruth.read(generated / "ground_truth.json")
+    injected = {u.uid for u in truth.units if u.anomaly == "CHARGEBACK_UNLINKED"}
+    raised = {r.subject_id for r in result.exceptions if r.code == "CHARGEBACK_UNLINKED"}
+
+    assert injected, "the fixture must contain unlinked reversals"
+    assert raised == injected, (
+        f"{len(raised - injected)} false alarms, {len(injected - raised)} missed")
+
+    # And the fee lines specifically must be absent from the queue.
+    fees = {e for e in result.repo.lines
+            if result.repo.lines[e].dispute_id is not None
+            and result.repo.lines[e].payment_id is None}
+    assert fees, "no fee lines in the fixture"
+    assert not (raised & fees), "a per-dispute fee was reported as an unlinked reversal"
