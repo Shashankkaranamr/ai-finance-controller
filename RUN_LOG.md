@@ -623,26 +623,30 @@ decision, and is then re-measured here.
 `blocked_hallucination` was split into two counters (D-025). Then the live run was repeated so the
 artifacts would match the claim, and **the second run returned a different answer**.
 
-| | run 1 | run 2 |
-|---|---|---|
-| Correct and verified | **5 / 22** | **3 / 22** |
-| `blocked_hallucination` (invented, or under-read available characters) | 3 | 5 |
-| `blocked_unverifiable` (read it right; document has no usable reference) | **14** | **14** |
-| Explanation rate | 20.83% (5/24) | 12.50% (3/24) |
-| **Linkage precision** | **100.00%** | **100.00%** |
-| Statement foots | YES | YES |
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| Correct and verified | **5 / 22** | **3 / 22** | **4 / 22** |
+| `blocked_hallucination` (invented, or under-read available characters) | 3 | 5 | 4 |
+| `blocked_unverifiable` (read it right; document has no usable reference) | **14** | **14** | **14** |
+| Explanation rate | 20.83% | 12.50% | 16.67% |
+| **Linkage precision** | **100.00%** | **100.00%** | **100.00%** |
+| Statement foots | YES | YES | YES |
+
+**On recoverable data (the 8 narrations where the UTR is actually present): 5/8, 3/8, 4/8 — 62%,
+38%, 50%.** Mean 50%, spread ±12 points. Three samples is still three samples, and it is quoted as a
+range for that reason.
 
 *(Run 1's split is the recorded proposals replayed through the new discriminator, since the code at
 the time had only one counter. Run 2 is the code computing it live.)*
 
 **The 14 are stable; all the variance is in the other 8.** That is the useful shape of this result.
-The `neft_truncated` family is 0/14 in both runs because the UTR is physically absent from the
-narration — no sampling changes that. The `rtgs_no_delimiter` family, where the UTR *is* present,
-went 5-correct then 3-correct out of 8.
+The `neft_truncated` family is 0/14 in all three runs because the UTR is physically absent from the
+narration — no amount of sampling changes that. The `rtgs_no_delimiter` family, where the UTR *is*
+present, went 5, then 3, then 4 out of 8.
 
-**So the honest headline is a range, not a number: 3–5 of 22 overall, 3–5 of 8 on recoverable data
-(38–62%), across two runs.** Quoting 62% alone would be quoting the better of two samples, which is
-exactly the cherry-picking §7 warns about.
+**So the honest headline is a range, not a number: 3–5 of 22 overall, 38–62% on recoverable data,
+across three runs.** Quoting 62% alone would be quoting the better sample, which is exactly the
+cherry-picking §7 warns about.
 
 ### This breaks determinism, and the invariant needs its boundary stated
 
@@ -658,25 +662,43 @@ reviewer.
 
 ### What did NOT vary
 
-Precision, both runs: **100.00%**. Statement foots, both runs. Journal entries posted only for
-verified links. Every wrong proposal rejected, twice, with the model varying underneath. **The fence
-is the part that does not move**, and that is the claim worth making — not the extraction rate.
+Precision, all three runs: **100.00%**. Statement foots, all three. Journal entries posted only for
+verified links. Every wrong proposal rejected, three times over, with the model's own accuracy
+swinging 38–62% underneath it. **The fence is the part that does not move**, and that is the claim
+worth making — not the extraction rate.
 
 ### Open question for review
 
 ~~Should `blocked_hallucination` split?~~ **Approved and done, 01 Sep 2026 — see D-025 and the
 addendum above.**
 
-### FLAGGED FOR THE INCREMENT 6 VIDEO SCRIPT
+### FLAGGED FOR THE INCREMENT 6 VIDEO SCRIPT — LEAD WITH THIS
 
-This is the sharpest result in the project and the narrative must survive into the video intact:
+> ## "Quoting 62% alone would be quoting the better sample."
+>
+> **This is the moment the video opens on.** We ran the held-out evaluation, got **5 of 22**. We
+> re-ran it to make the artifacts match, and got **3 of 22**. Then a third run: **4 of 22**. Same
+> data, same prompt, same model.
+>
+> **We reported the range.** Not the first number, not the best number — 38–62% on recoverable
+> data, across three runs. The temptation to quote 62% and move on is exactly the failure §7 warns
+> about, and resisting it is the point.
+>
+> And underneath a model swinging by 24 points, **linkage precision was 100.00% in all three runs.**
+> The fence never moved. That is the system working: the LLM is allowed to be unreliable, because
+> nothing it proposes reaches the ledger without an exact-lookup verification it cannot talk its way
+> past.
 
-1. **100% linkage precision held under a real adversarial model, twice**, while the model's own
-   accuracy varied from 5/22 to 3/22 underneath it. The fence is the invariant, not the model.
-2. **The system distinguished "the model was wrong" (3–5) from "the answer was not recoverable"
-   (14).** That is the same judgment Tier 0 already applies to a duplicated UTR (D-014, D-023),
-   sharpened one level: an unverifiable reference is refused *and* correctly not blamed on the model.
-3. **62% on recoverable data is a range, 38–62%, over two runs.** Quote the range. Quoting 62% is
-   quoting the better sample.
-4. The honest framing: *we gave the LLM the one job it is suited for, on the smallest model that
-   does it, and then measured it against an adversary and against itself.*
+Supporting beats, in order:
+
+1. **The system distinguished "the model was wrong" (3–5) from "the answer was not recoverable"
+   (14).** The `neft_truncated` narrations have the UTR physically cut out of them at 40 characters —
+   nobody can recover it, and the model was *right* to return only what was there. Rejecting it was
+   still correct; calling it a hallucination was our error, and we fixed the counter (D-025). Same
+   judgment Tier 0 already applies to a duplicated UTR (D-014, D-023), sharpened one level.
+2. **The LLM is never consulted on the dev seed at all** — the regex parses 100% of it, so zero calls
+   are made. It is asked only where determinism fails, which is the argument for where an LLM belongs.
+3. **Smallest model that does the job** (`claude-haiku-4-5`), one narrow job, every output verified.
+   An oversized model on a narrow job is the same mistake as an LLM doing arithmetic, one level up.
+4. Closing frame: *we gave the LLM the one job it is suited for, on the smallest model that does it,
+   and then measured it against an adversary, against a held-out set, and against itself.*
