@@ -144,7 +144,13 @@ class ExceptionType(Enum):
     # is not in the extract. See generate/world.py::_build_orphan_refunds.
     REFUND_ORPHANED = ("REFUND_ORPHANED", True, 0, False)
     # Extraction from narration shapes no deterministic parser was written for.
-    NARRATION_UNPARSEABLE = ("NARRATION_UNPARSEABLE", True, 0, True)
+    #
+    # NOT a break (F-014). A parse failure is OUR limitation, not something
+    # wrong with the merchant's money. Counting it as a break put 22 records in
+    # the held-out break queue for a statement that was entirely correct, and
+    # double-counted the same event -- once here, once as a settlement whose
+    # credit could not then be confirmed.
+    NARRATION_UNPARSEABLE = ("NARRATION_UNPARSEABLE", False, 0, True)
     # --- Increment 1: declared once the generator could actually produce them ---
     # Needs the contracted rate card to know the fee was wrong. The report is
     # internally consistent, so no identity over reported values can catch it.
@@ -169,6 +175,12 @@ class ExceptionType(Enum):
     # legitimately, so the books and the bank disagree CORRECTLY. Notable, not a
     # break -- counting it as one would inflate the queue with correct behaviour.
     ON_HOLD_NOT_SETTLED = ("ON_HOLD_NOT_SETTLED", False, 0, True)
+    # A settlement whose credit could not be CONFIRMED, because credits remain
+    # unread in the statement. Distinct from MISSING_BANK_CREDIT, which asserts
+    # the money never arrived -- a claim only defensible once every credit has
+    # been read. Saying "missing" while 22 credits sit unparsed told treasury
+    # Rs 33 lakh had not arrived when it had (F-014).
+    SETTLEMENT_UNCONFIRMED = ("SETTLEMENT_UNCONFIRMED", False, 0, True)
     # Sec 6 lists 20. Still undeclared, because the generator cannot yet produce
     # them and a taxonomy entry with no data behind it is a claim we cannot back:
     # TDS_194O_VARIANCE (out by persona), FX_VARIANCE (FX cut),

@@ -33,7 +33,7 @@ from ..domain.graph import (BUILT_TIER, ComponentType, EdgeKind, EdgeStatus,
 from ..domain.truth import GroundTruth
 from ..generate.narration import parse_utr
 from ..money import Paise, format_bps, format_inr, ratio_bps
-from .exceptions import ExceptionRecord
+from .exceptions import SUBJECT_UNIT, ExceptionRecord
 
 ACCEPTED = (EdgeStatus.EXPLAINED, EdgeStatus.MATCHED)
 
@@ -74,12 +74,14 @@ class Metrics:
     false_clear_in_remit: Rate
     false_clear_out_of_remit: Rate
     exception_typing_accuracy: Rate
+    exception_queue_precision: Rate
     intrinsic_clean_rate: Rate
     narration_parse_rate: Rate
     decomposition_closure: Rate
     residual_total: Paise = Paise(0)
     residual_by_component: dict[str, int] = field(default_factory=dict)
     injected_by_class: dict[str, int] = field(default_factory=dict)
+    false_alarms_by_code: dict[str, int] = field(default_factory=dict)
     explained_by_basis: dict[str, int] = field(default_factory=dict)
     ablation: dict[str, dict] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
@@ -104,6 +106,13 @@ class Metrics:
                 "false_clear_in_remit": self.false_clear_in_remit.to_json(),
                 "false_clear_out_of_remit": self.false_clear_out_of_remit.to_json(),
                 "exception_typing_accuracy": self.exception_typing_accuracy.to_json(),
+                # The OTHER error direction. False clear measures what we missed;
+                # this measures what we raised that was not real. A queue full of
+                # false alarms is how a controller learns to ignore the queue, and
+                # Sec 6 names an inflated exception count as the thing that
+                # understates the agent. Publishing it was FIX-2.
+                "exception_queue_precision": self.exception_queue_precision.to_json(),
+                "false_alarms_by_code": dict(sorted(self.false_alarms_by_code.items())),
             },
             # Properties of the DATA, computed from ground_truth.json with no
             # resolver involved. This is what the 85-92% realism target is checked
@@ -171,6 +180,11 @@ class Metrics:
             "  " + self.false_clear_out_of_remit.line()
             + f"   (needs tier > {BUILT_TIER})",
             "  " + self.exception_typing_accuracy.line(),
+            "  " + self.exception_queue_precision.line() + "   <-- the other direction",
+        ]
+        for code, n in sorted(self.false_alarms_by_code.items(), key=lambda kv: -kv[1])[:4]:
+            lines.append(f"      false alarms: {code:<34} {n}")
+        lines += [
             "",
             "DATA REALISM (from ground truth, no resolver involved)",
             "  " + self.intrinsic_clean_rate.line(),
@@ -297,6 +311,32 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         len(missed_out_of_remit), len(truth_breaks) - len(in_remit_breaks),
         "not attempted (no resolver built yet)")
 
+    # --- did we raise things that were not real? ------------------------------
+    # False clear measures one error direction with real rigour. This measures the
+    # other, which was entirely unmeasured until FIX-2: a queue that cries wolf is
+    # how a controller learns to ignore it.
+    #
+    # Evaluated over UNIT-subjected break records only, because ground truth is
+    # unit-keyed. An edge-subjected break (an unexplained residual) has no truth
+    # unit to compare against and is counted separately rather than scored as a
+    # false alarm by default.
+    break_records = [r for r in exceptions if r.is_break]
+    evaluable = [r for r in break_records if r.subject_kind == SUBJECT_UNIT]
+    truth_by_uid = truth.units_by_uid()
+
+    def is_real(record) -> bool:
+        unit = truth_by_uid.get(record.subject_id)
+        return unit is not None and unit.anomaly == record.code
+
+    real = [r for r in evaluable if is_real(r)]
+    false_alarms_by_code: dict[str, int] = {}
+    for record in evaluable:
+        if not is_real(record):
+            false_alarms_by_code[record.code] = false_alarms_by_code.get(record.code, 0) + 1
+
+    exception_queue_precision = Rate(
+        len(real), len(evaluable), "exception queue precision (raised breaks that are real)")
+
     # --- properties of the DATA, not of the resolver --------------------------
     # Answers "is the synthetic data too clean?" (BRIEF Sec 5: 85-92% cleanly
     # resolvable). Computed from ground truth alone: the resolver's explanation
@@ -389,6 +429,7 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         "exceptions_total": len(exceptions),
         "exceptions_breaks": len([r for r in exceptions if r.is_break]),
         "exceptions_informational": len([r for r in exceptions if not r.is_break]),
+        "breaks_not_evaluable_against_truth": len(break_records) - len(evaluable),
         "quarantined_rows": len(repo.quarantined),
         "records_ingested": repo.total_records,
         "bank_credits": len(repo.bank),
@@ -411,6 +452,8 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         false_clear_in_remit=false_clear_in_remit,
         false_clear_out_of_remit=false_clear_out_of_remit,
         exception_typing_accuracy=exception_typing_accuracy,
+        exception_queue_precision=exception_queue_precision,
+        false_alarms_by_code=false_alarms_by_code,
         intrinsic_clean_rate=intrinsic_clean_rate,
         narration_parse_rate=narration_parse_rate,
         decomposition_closure=decomposition_closure,

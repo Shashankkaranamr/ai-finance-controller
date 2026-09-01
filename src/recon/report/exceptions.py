@@ -92,6 +92,11 @@ PLAYBOOK: dict[ExceptionType, tuple[str, str]] = {
     ExceptionType.PERIOD_CUTOFF_TIMING: (
         "Informational: straddles the period close. Must not be counted as a break.",
         "finance-ops"),
+    ExceptionType.SETTLEMENT_UNCONFIRMED: (
+        "Cannot confirm this settlement's credit while credits remain unread in the "
+        "statement. Resolve the unparsed narrations first; do NOT chase the gateway on "
+        "the strength of this record.",
+        "finance-ops"),
     ExceptionType.ON_HOLD_NOT_SETTLED: (
         "Informational: captured but held by the gateway, so no cash moved. Carry as "
         "in-transit receivable; escalate only if the hold outlives the dispute window.",

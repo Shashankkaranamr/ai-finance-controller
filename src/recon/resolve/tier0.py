@@ -48,9 +48,9 @@ def resolve(repo: Repository, audit: AuditLog) -> tuple[list[ReconEdge], list[Ex
     _resolve_refunds(repo, edges, exceptions, audit)
     _check_line_flags(repo, exceptions, audit)
     _check_gst_identity(repo, exceptions, audit)
-    matched_settlements = _resolve_bank_credits(
+    matched_settlements, unread = _resolve_bank_credits(
         repo, members_by_settlement, settlement_by_utr, edges, exceptions, audit)
-    _flag_missing_bank_credits(repo, matched_settlements, exceptions, audit)
+    _flag_missing_bank_credits(repo, matched_settlements, unread, exceptions, audit)
 
     edges.sort(key=lambda e: e.sort_key())
     return edges, exceptions
@@ -373,7 +373,7 @@ def _check_gst_identity(repo, exceptions, audit) -> None:
 # --- bank credit <-> settlement (1:1, the headline grain) ---------------------
 
 def _resolve_bank_credits(repo, members_by_settlement, settlement_by_utr,
-                          edges, exceptions, audit) -> set[str]:
+                          edges, exceptions, audit) -> tuple[set[str], int]:
     matched: set[str] = set()
 
     # Extract first, then group: a UTR carried by two credits is an ambiguity Tier
@@ -512,17 +512,50 @@ def _resolve_bank_credits(repo, members_by_settlement, settlement_by_utr,
                 confidence=70,
                 evidence=edge.evidence))
 
-    return matched
+    return matched, sum(1 for utr in extracted.values() if utr is None)
 
 
 # --- settlements with no bank credit at all ----------------------------------
 
-def _flag_missing_bank_credits(repo, matched_settlements, exceptions, audit) -> None:
-    """The absence of an edge, not a bad edge -- see report/exceptions.py."""
+def _flag_missing_bank_credits(repo, matched_settlements, unread, exceptions, audit) -> None:
+    """The absence of an edge, not a bad edge -- see report/exceptions.py.
+
+    "MISSING" IS A CLAIM ABOUT THE WORLD, AND IT NEEDS A FULLY READ STATEMENT
+    -------------------------------------------------------------------------
+    Saying a settlement never reached the bank asserts something a treasury team
+    will act on. It is only defensible once EVERY credit in the statement has been
+    read. With `unread` credits outstanding, the honest statement is weaker and
+    different: this settlement's credit cannot be CONFIRMED, and one of the
+    narrations we could not parse may well be it.
+
+    Shipped the wrong way round, this told treasury that Rs 33 lakh across 22
+    settlements had not arrived, on a held-out statement where 21 of them plainly
+    had (F-014). The settlement is still flagged either way -- detection is
+    unaffected -- but the code, the severity and the suggested action change, and
+    those are what a human acts on.
+    """
     for settlement_id in sorted(repo.settlements):
         if settlement_id in matched_settlements:
             continue
         settlement = repo.settlements[settlement_id]
+        if unread:
+            exceptions.append(ExceptionRecord.build(
+                ExceptionType.SETTLEMENT_UNCONFIRMED, SUBJECT_UNIT, settlement_id,
+                Paise(settlement.amount),
+                hypothesis=(
+                    f"Settlement {settlement_id} for "
+                    f"{format_inr(Paise(settlement.amount))} could not be confirmed: no "
+                    f"credit was linked to it, and {unread} credit(s) in the statement "
+                    "could not be parsed. One of those may be this settlement. This is "
+                    "NOT an assertion that the money is missing."),
+                confidence=100,
+                evidence=(
+                    Evidence("unread_credits_remain",
+                             f"{unread} of {len(repo.bank)} bank credits yielded no UTR",
+                             (f"settlement:{settlement_id}",)),)))
+            audit.record("settlement_unconfirmed", settlement=settlement_id,
+                         unread_credits=unread)
+            continue
         exceptions.append(ExceptionRecord.build(
             ExceptionType.MISSING_BANK_CREDIT, SUBJECT_UNIT, settlement_id,
             Paise(settlement.amount),
@@ -530,7 +563,8 @@ def _flag_missing_bank_credits(repo, matched_settlements, exceptions, audit) -> 
                 f"Settlement {settlement_id} (UTR {settlement.utr}) was processed on "
                 f"{settlement.created_at.isoformat()} for "
                 f"{format_inr(Paise(settlement.amount))}, but no bank credit carrying "
-                "that UTR appears in the statement."),
+                "that UTR appears in the statement. Every credit in the statement was "
+                "read, so this is a genuine absence."),
             evidence=(
                 Evidence("settlement_processed",
                          f"status={settlement.status}, utr={settlement.utr}, "

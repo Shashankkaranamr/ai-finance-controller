@@ -232,3 +232,74 @@ def test_a_chargeback_fee_is_not_reported_as_an_unlinked_reversal(result, genera
             and result.repo.lines[e].payment_id is None}
     assert fees, "no fee lines in the fixture"
     assert not (raised & fees), "a per-dispute fee was reported as an unlinked reversal"
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_queue_publishes_its_false_alarm_rate(seed, generated, generated_eval, tmp_path):
+    """FIX-2. False clear measures what we missed; this measures what we invented.
+
+    Until this landed the metric suite measured one error direction with real
+    rigour and the other not at all — which is how a queue reaches 26% noise on a
+    held-out seed and no number moves. Sec 6 names an inflated exception count as
+    the thing that understates the agent.
+    """
+    from recon.resolve import pipeline
+
+    data = generated if seed == "dev" else generated_eval
+    result = pipeline.run(data, tmp_path / seed)
+    p = result.metrics.exception_queue_precision
+
+    assert p.denominator > 0, "nothing evaluable — the metric would be vacuous"
+    assert p.numerator <= p.denominator
+    # It must be computed against truth, not asserted: every false alarm is
+    # attributable to a code.
+    assert sum(result.metrics.false_alarms_by_code.values()) == p.denominator - p.numerator
+
+
+def test_missing_is_only_asserted_once_every_credit_has_been_read(generated_eval, tmp_path):
+    """FIX-3 / F-014. "The money never arrived" is a claim a treasury team acts on.
+
+    On the held-out seed no narration parses, so 22 settlements had no linked
+    credit — and the system told treasury all 22 were MISSING when 21 of them were
+    sitting in the bank file. The honest statement while credits remain unread is
+    weaker and different: cannot confirm.
+
+    The settlement is still flagged either way, so detection is unaffected; what
+    changes is the code, the severity and the action a human takes.
+    """
+    from recon.resolve import pipeline
+
+    result = pipeline.run(generated_eval, tmp_path / "unconfirmed")
+    truth = GroundTruth.read(generated_eval / "ground_truth.json")
+
+    really_missing = {u.uid for u in truth.units if u.anomaly == "MISSING_BANK_CREDIT"}
+    claimed_missing = {r.subject_id for r in result.exceptions
+                       if r.code == "MISSING_BANK_CREDIT"}
+    unconfirmed = {r.subject_id for r in result.exceptions
+                   if r.code == "SETTLEMENT_UNCONFIRMED"}
+
+    assert not claimed_missing - really_missing, (
+        f"asserted {len(claimed_missing - really_missing)} settlements missing that arrived")
+    assert really_missing <= (claimed_missing | unconfirmed), "a real absence went unflagged"
+    assert unconfirmed, "with 22 unparsed credits, settlements must be unconfirmed not missing"
+
+    # And it must be informational, not a break: nothing is wrong with the money.
+    for record in result.exceptions:
+        if record.code == "SETTLEMENT_UNCONFIRMED":
+            assert not record.is_break
+
+
+def test_a_parse_failure_is_our_limitation_not_a_merchant_break(generated_eval, tmp_path):
+    """FIX-3. NARRATION_UNPARSEABLE is no longer counted as a break.
+
+    Nothing is wrong with the merchant's money when our regex fails. Counting it
+    as a break put 22 records in the held-out break queue for a correct statement,
+    and double-counted one event as both an unreadable credit and an unconfirmed
+    settlement.
+    """
+    from recon.resolve import pipeline
+
+    result = pipeline.run(generated_eval, tmp_path / "parsefail")
+    unparsed = [r for r in result.exceptions if r.code == "NARRATION_UNPARSEABLE"]
+    assert unparsed, "the held-out seed must still exercise the parser failing"
+    assert all(not r.is_break for r in unparsed)
