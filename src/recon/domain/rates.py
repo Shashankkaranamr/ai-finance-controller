@@ -117,6 +117,19 @@ RESERVE_HOLD_DAYS = 45
 # CHARGEBACK_FEE_UNBOOKED exists precisely because they come apart.
 CHARGEBACK_FEE_PAISE = 150_000     # Rs 1,500
 
+# How long after a transfer is initiated the credit may still post, in calendar
+# days. Same class of constant as the reserve rate: CONTRACT knowledge, not
+# something read off the data -- a real deployment takes it from the bank's
+# posting SLA. It exists because `settled_at != bank value date` (BRIEF Sec 3.4),
+# and Tier 2 needs a bound on "could this credit be that settlement" that is a
+# fact about settlement mechanics rather than a tolerance chosen to make matches.
+#
+# 3 days is the widest gap the mechanism can produce: a transfer initiated on a
+# Friday, posting one business day later, lands on Monday.
+# `test_the_posting_window_bounds_every_generated_credit` fails if the generator
+# ever exceeds it, so the two cannot drift apart silently.
+BANK_POSTING_WINDOW_DAYS = 3
+
 # Instant (on-demand, setlod_*) settlements carry their own fee on top of MDR.
 INSTANT_SETTLEMENT_FEE_BPS = 25    # 0.25%
 

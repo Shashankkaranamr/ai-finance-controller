@@ -970,3 +970,46 @@ would have read 99.4%. Per grain the bank number is 20/20, and a hallucination r
 **What it rules out:** Resting the fence claim on the aggregate. The aggregate is not wrong; it is
 just not the number the claim depends on.
 **Supersedes:** —
+
+### D-033 · Realism increment · 2026-09-02 · Corroboration matches an exact amount inside a posting window
+**Decision:** Tier 2 links a credit to a settlement when the **amount matches to the paise** and the
+credit's `value_date` falls in `[settlement.created_at, + BANK_POSTING_WINDOW_DAYS]`, with uniqueness
+still required in both directions and every tie refused. The window is asymmetric: a credit may post
+on the settlement date or after it, never before.
+**Why:** BRIEF Sec 3.4 lists `created_at != settled_at != bank value date` as one of the two
+structural difficulties of this domain, and `derive_bank` was copying `settled_on` straight into
+`value_date`. Closing that (C-2(a)) took the held-out explanation rate from **18/23 to 4/23**: the
+entire Tier 2 result rested on a field the bank does not restate. Under the windowed rule it returns
+to **18/23**, because the amount is what actually discriminates — 22 of 22 settlement amounts are
+distinct on both seeds, the two closest Rs 171.98 apart.
+**Why this is not the tolerance D-027 refused:** D-027 refuses a tolerance on MONEY, because an
+arithmetic proof downgraded to a score is the Sec 9 anti-pattern, and there is still none — a test
+shifts every credit by one paise and asserts Tier 2 drops to zero links. A window on a DATE is a
+statement about settlement mechanics: a credit cannot post before its transfer was initiated, and it
+cannot post a month later. The refusal to break ties, which is the part D-014 and D-027 actually
+turn on, is unchanged.
+**What it rules out:** Quoting Tier 2's result without saying that the amount carries it. Also rules
+out a symmetric window, which would be a convenience rather than a mechanism.
+**Cost, stated:** `BANK_POSTING_WINDOW_DAYS` is CONTRACT knowledge, the same class as the reserve
+rate under D-019 — a real deployment reads it off the bank's posting SLA rather than off the data.
+`test_the_posting_window_bounds_every_generated_credit` asserts the generator and the constant cannot
+drift apart silently.
+**Supersedes:** the keying half of **D-027**. The tier, its ordering before Tier 3, and its refusal
+of every tie all stand; only `(amount, value_date)` as an exact pair is replaced.
+
+### D-034 · Realism increment · 2026-09-02 · C-1 is withdrawn as a caveat: the amount tie-out is real
+**Decision:** Do not model a bank netting its charges out of an inbound settlement credit.
+`ARCHITECTURE.md` Sec 4 is corrected rather than implemented.
+**Why:** The caveat read "a real statement nets bank charges out of the credit". For an INBOUND
+NEFT/RTGS/IMPS credit to an Indian merchant's account that is not what happens — the beneficiary bank
+does not deduct a charge from an inward transfer, so the settlement amount and the bank credit tie out
+exactly. Implementing the caveat would have made the simulated world **less** like a real settlement
+flow, not more, which is the opposite of what this increment was scoped to do.
+**What it changes about the finding:** it strengthens the deterministic result rather than weakening
+it. The exact amount tie-out is a genuine property of settlement flows, which is why corroboration on
+an exact amount survives C-2(a) at all. The DATE half of the same caveat was real, was closed, and did
+change the answer.
+**What it rules out:** treating the Sec 4 caveat list as automatically correct. One of five entries was
+wrong on the domain facts, and the ranking that opened this increment was worth more than the list.
+**Supersedes:** the amount half of the "(amount, value_date) is a clean key" caveat, as written on
+01 Sep.

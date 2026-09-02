@@ -309,26 +309,76 @@ taxonomy entry with no data behind it is a claim we cannot back.
 
 ### What the simulator makes easier than reality
 
-Stated because a reviewer will find it, and because Tier 2's result depends on it:
+Stated because a reviewer will find it. This list was the input to the 02 Sep realism increment: each
+entry was ranked for how much it understates real difficulty, three were closed, one was **withdrawn
+as factually wrong**, and the rest are named with what they would cost.
 
-**`(amount, value_date)` is a clean key here, and would not be in the field.** `derive_bank` copies the
-settlement's amount and date straight through, and a 4-day cycle gives one settlement per date. A real
-bank nets its charges out of the credit, batches across dates, and a real merchant settles daily or
-more often — all of which break the uniqueness Tier 2 depends on. Corroboration is a genuine technique
-a real deployment would use as *evidence*; its strength on this data is partly a property of the
-simulator.
+#### Closed on 02 Sep, and what each one cost the result
 
-**The settlement cadence is unrealistically clean**: one settlement per 4 days, each on its own date,
-all `status: processed`, no failed or reversed settlements, no same-day multiples.
+**The bank value date was a copy of the settlement date.** `derive_bank` wrote `settled_on` straight
+into `value_date`, while BRIEF §3.4 lists `created_at ≠ settled_at ≠ bank value date` as one of the
+two structural difficulties of this domain. A credit now posts on the settlement date or the next
+business day, and never on a weekend.
+
+*What it cost:* Tier 2's exact `(amount, value_date)` join collapsed from **18/23 to 4/23** on the
+held-out seed. The entire corroboration result had been resting on a field the bank does not restate.
+Under the windowed rule (D-033) it returns to **18/23** — because the *amount* is what discriminates,
+not the date. Same-day multiple credits now occur, so "no same-day multiples" is no longer true either.
+
+**`status` was hard-coded to `processed`.** One settlement per seed now reports `failed` and produces
+no credit. A failed settlement and a missing credit are identical in a bank statement — neither has a
+row — and opposite findings: one sends an analyst to the gateway, the other to the bank.
+
+*What it cost:* it exposed **F-017**, Tier 2 corroborating a credit against a settlement Tier 0 had
+declared failed in the same run — the first movement in held-out linkage precision (100.00% → 99.97%)
+and in-remit false clear (0.00% → 0.53%) in the project's history. Both restored.
+
+**Two §3.2 identities could not fail.** `settlement.amount` was computed from the line items the
+resolver re-sums, and the bank credit was copied from it. Two settlements per seed now report a total
+struck before one of their own lines posted.
+
+*What it cost:* it exposed **F-016**, Tier 1 marking edges fully explained and **posting journal
+entries** for settlements whose own report contradicted the bank. Live since Increment 2 and
+undetectable until data could make the tie-out fail.
+
+> An identity that cannot fail is not a passing test. It is an untested region with a green light
+> over it. Two of the four entries on this list were holding live defects out of reach of the suite.
+
+#### Withdrawn — this caveat was wrong (D-034)
+
+The 01 Sep list claimed **"a real bank nets its charges out of the credit"**. For an *inbound*
+NEFT/RTGS/IMPS credit to an Indian merchant's account, the beneficiary bank does not deduct a charge
+from an inward transfer: the settlement amount and the bank credit tie out **exactly**, which is
+precisely why a real reconciler can lean on the amount. Modelling the netting would have made this
+world *less* like a real settlement flow. The **date** half of the same caveat was real, was closed,
+and did change the answer; the **amount** half was not.
+
+#### Still open, with what each would cost
 
 **The UTR format is invented.** `[0-9]{10}[a-z0-9]{6}` matches no real Indian instrument — NEFT UTRs
-carry a bank prefix, UPI RRNs are 12 digits. The adjudicator's prompt is given that spec, so the model
-is told our format rather than having to infer a real one.
+carry a bank prefix, UPI and IMPS RRNs are 12 digits. The adjudicator's prompt is given that spec, so
+the model is told our format rather than having to infer a real one. **3–4 h**, and the highest blast
+radius on the list: every UTR changes, so every `bank_ref` (a CRC of it) changes with it. Declined on
+02 Sep for time, not on merit — it is the one remaining gap that could move the extraction result in
+either direction.
 
-**Three §3.2 identities cannot currently fail.** `settlement.amount` is computed from the same line
-items it is later checked against on the reporting side, and the bank credit is copied from it, so
-rollup and tie-out hold by construction rather than by verification. Injecting a short credit and a
-stale total would make them mean something — the highest-value remaining generator work.
+**The narration registry is thin**: five families, two held out. Adding more is cheap, and was
+declined deliberately — no realism argument selects *which* new shapes to add, so the choice would be
+downstream of "this would give the LLM more to do", which is the reasoning this increment was scoped
+to avoid.
+
+**One settlement per 4 days.** A real merchant settles daily. Moving to a daily cycle takes 22 cycles
+to 88, breaks the brief's own 15–25 band (§5) and re-baselines every published denominator. The part
+of this that mattered — credits sharing a date — arrived anyway through the posting lag.
+
+**An on-demand settlement replaces its cycle's scheduled one** rather than drawing against the pending
+balance alongside it, which is what §3.4's "interleave" describes. A larger change to the money model
+than the gap named, and out of scope for the increment.
+
+**The remaining §3.2 identity, the bank tie-out, can now fail** — a stale total breaks it, and F-016
+was the proof. What is still absent is a credit that arrives *short* of a correct settlement total.
+The realistic mechanism for that is a failed transfer re-issued inside the window, which is the
+on-demand modelling above.
 
 ---
 

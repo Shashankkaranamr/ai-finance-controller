@@ -1006,3 +1006,116 @@ Tier 2's key and only the UTR is independent of every amount being right. Those 
 convert to **zero** additional explained settlements, and both halves are published together.
 
 Still unmeasured with a real model: no `ANTHROPIC_API_KEY` in this environment (D-022).
+
+---
+
+## Realism increment — C-2(a): the bank value date · 02 Sep 2026
+
+**The gap.** BRIEF §3.4 lists `created_at ≠ settled_at ≠ bank value date` as one of the two structural
+difficulties of this domain. `derive_bank` wrote `settled_on` straight into `value_date`. The bank
+statement was restating the gateway's own date, which is a property no statement has.
+
+A credit now posts on the settlement date or the next business day, and never on a weekend. Measured
+drift between `settlement.created_at` and `bank.value_date`, in calendar days:
+
+| drift | dev | eval |
+|---|---|---|
+| 0 days | 9 | 4 |
+| 1 day | 8 | 8 |
+| 2 days | 1 | 4 |
+| 3 days | 1 | 2 |
+
+Weekend value dates: **0**. Dates carrying more than one credit: **2 on dev, 1 on eval** — so "no
+same-day multiples", the other half of the C-2 caveat, is closed as a side effect of the same
+mechanism rather than by forcing it.
+
+### Guard (D) was built first, and deliberately
+
+The tier-prefix differential (ARCHITECTURE §3b) was in place **before** this change was written,
+because C-2(a) is exactly the kind of edit that produced F-016 and F-017: new linking logic in a tier
+that sits above another tier's conclusions. It was validated by re-introducing F-017 rather than by
+reasoning about it — with both fixes reverted and the seeds regenerated it fails with
+`eval: tier 2 silenced 1 real break(s) that tier 1 had flagged: ['bc_1582830180d']`.
+
+**It did not fire during C-2(a) development.** Reported because a guard that never fires is worth
+exactly as much as its validation, and no more.
+
+### The collapse, measured before it was repaired
+
+This is the number the whole increment exists to produce. With the value dates made realistic and
+Tier 2 **unchanged**:
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate | 17/23 (unchanged) | **18/23 → 4/23** |
+| Settlement coverage | 17/22 (unchanged) | **18/22 → 4/22** |
+
+Tier 2's exact `(amount, value_date)` join lost **14 of 18 links** on the held-out seed. Dev is
+untouched because dev links by UTR at Tier 0 — the narration parses there. So the audit's headline
+finding of 01 Sep, that a two-field exact join reproduced the entire result, **rested entirely on
+`derive_bank` copying one field**. That is an artifact, and it is now measured as one.
+
+### The repair, and what it reveals (D-033)
+
+Tier 2 now requires the amount to match **to the paise** and the value date to fall inside
+`[created_at, +BANK_POSTING_WINDOW_DAYS]`, uniqueness still required both ways, every tie still
+refused. A window on a date is a statement about settlement mechanics; a tolerance on money would be a
+score, and there is still none — a test shifts every credit by one paise and asserts Tier 2 drops to
+zero links.
+
+| eval, held out | before C-2(a) | date drift, T2 unchanged | + windowed rule |
+|---|---|---|---|
+| Explanation rate | 18/23 | **4/23** | **18/23** |
+| Linkage precision | 100.00% | 100.00% | **100.00%** (18/18 bank grain) |
+
+**Full recovery — and the recovery is the finding.** What carries corroboration is the *amount*, not
+the date: 22 of 22 settlement amounts are distinct on both seeds, the two closest **Rs 171.98** apart.
+A mixed merchant's daily net settlement is an effectively random paise value, so that uniqueness is a
+real property of settlement flows rather than an artifact of the simulator — which is also why C-1 was
+withdrawn rather than closed (D-034).
+
+### Measured, both seeds, after C-2(a)
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate · settlement coverage | **73.91% (17/23) · 77.27% (17/22)** | **78.26% (18/23) · 81.82% (18/22)** |
+| Linkage precision (bank grain) | **100.00%** (19/19) | **100.00%** (18/18) |
+| Exception detection recall | **100.00%** (195/195) | **100.00%** (187/187) |
+| **False clear, in remit** | **0.00%** (0/195) | **0.00%** (0/187) |
+| Exception queue precision | 94.69% (196/207) | 93.00% (186/200) |
+| Journal entries, all balanced | 17 | 18 |
+| Statement foots | **YES** | **YES** |
+| Determinism, incl. regeneration | byte-identical | byte-identical |
+| Tests | **207 passed** | — |
+
+`metrics.json` hashes to the same value it did before C-2(a) on both seeds. The underlying data
+changed materially — every credit's value date moved — and the measured outcome did not. The windowed
+rule reaches the same 17 and 18 settlements by a different route.
+
+### Prediction 3, as registered before any of this work
+
+> "Tier 2's shipped rule collapses to ~0; under the windowed rule it recovers to ~20, because amount
+> alone is decisive (22/22 distinct, Rs 172 minimum gap). **LLM contribution stays at zero.**"
+
+**Right on all three counts**, including the mechanism. The collapse was to 4 rather than 0 — four
+credits happened to post same-day and still matched exactly — and the recovery was to 18 rather than
+~20 because C-4(i) and C-2(b) had already removed two settlements from the reachable set for
+unrelated and correct reasons.
+
+### The LLM's ceiling after every closed gap
+
+| oracle headroom (explanation) | dev | eval |
+|---|---|---|
+| start of increment | 0 of 24 | 1 of 24 |
+| after C-4(i) | 0 of 24 | 0 of 24 |
+| after C-2(b) | 0 of 23 | 0 of 23 |
+| **after C-2(a)** | **0 of 23** | **0 of 23** |
+
+A **perfect** extractor — the upper bound on any model, measurable with no API key — adds **zero
+explained credits** on either seed, at every stage of this increment. It never rose above one.
+
+At the **linkage** grain it is not zero: the oracle takes the held-out bank grain from **18 to 20**,
+recovering the two settlements whose stale totals put them beyond any amount-based rule. Those two
+links convert to **zero** additional explained settlements, because the report still contradicts
+itself and nothing posts. Both halves are published together, because the first without the second
+would overstate what extraction buys.

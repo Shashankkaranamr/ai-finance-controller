@@ -159,7 +159,10 @@ def derive_bank(world: World, config: GenConfig) -> list[dict]:
         family = rng.choice(families)
         rows.append({
             "bank_ref": bank_uid_for(settlement),
-            "value_date": settlement.settled_on.isoformat(),
+            # The date the CREDIT posted, which is not the date the settlement was
+            # initiated (BRIEF Sec 3.4). Copying `settled_on` here made the bank's
+            # date an exact restatement of the gateway's, and no statement is.
+            "value_date": (settlement.credit_value_date or settlement.settled_on).isoformat(),
             "amount": int(settlement.amount),
             "currency": "INR",
             "narration": render(family, settlement.utr, rng),

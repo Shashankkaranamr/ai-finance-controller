@@ -15,8 +15,10 @@ from __future__ import annotations
 import json
 
 from recon.domain.graph import BUILT_TIER, ComponentType, ExceptionType
-from recon.domain.rates import MDR_SLABS, Instrument, mdr_rate_bps
+from recon.domain.rates import (BANK_POSTING_WINDOW_DAYS, MDR_SLABS, Instrument,
+                                mdr_rate_bps)
 from recon.domain.truth import GroundTruth
+from recon.ingest.load import load_all
 from recon.generate.narration import FAMILIES, SPLIT_DEV, SPLIT_EVAL, families_for, parse_utr
 from recon.generate.world import GenConfig, build_world, emit_ground_truth
 from recon.report.exceptions import PLAYBOOK
@@ -360,3 +362,76 @@ def inspect_source(module) -> str:
     import inspect
 
     return inspect.getsource(module)
+
+
+# --- C-2(a): the bank value date is not the settlement date -------------------
+
+@pytest.mark.parametrize("seed", ("dev", "eval"))
+def test_the_posting_window_bounds_every_generated_credit(
+        seed, generated, generated_eval):
+    """`BANK_POSTING_WINDOW_DAYS` and the generator must not drift apart.
+
+    Tier 2 links on exact amount plus this window. If the generator ever posts a
+    credit outside it the tier goes silently blind, so the constant is asserted
+    against the data rather than trusted -- the same reason the reserve rate is
+    checked against a line item instead of assumed.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = load_all(data_dir)
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+
+    checked = 0
+    for edge in truth.edges:
+        if edge.kind != "bank_to_settlement":
+            continue
+        credit = repo.bank.get(edge.src_uid)
+        settlement = repo.settlements.get(edge.dst_uid)
+        if credit is None or settlement is None:
+            continue
+        drift = (credit.value_date - settlement.created_at).days
+        assert 0 <= drift <= BANK_POSTING_WINDOW_DAYS, (
+            f"{edge.src_uid} posted {drift} days after settlement "
+            f"{edge.dst_uid} was initiated; the window is "
+            f"{BANK_POSTING_WINDOW_DAYS} and Tier 2 would never see it")
+        checked += 1
+    assert checked, "no genuine bank->settlement pairs; this test is blind"
+
+
+@pytest.mark.parametrize("seed", ("dev", "eval"))
+def test_no_bank_credit_carries_a_weekend_value_date(seed, generated, generated_eval):
+    """Banks do not post value on a Saturday or a Sunday."""
+    repo = load_all(generated if seed == "dev" else generated_eval)
+    weekend = [c.bank_ref for c in repo.bank.values() if c.value_date.weekday() >= 5]
+    assert not weekend, f"{len(weekend)} credits carry a weekend value date: {weekend[:3]}"
+
+
+@pytest.mark.parametrize("seed", ("dev", "eval"))
+def test_the_value_date_is_not_a_restatement_of_the_settlement_date(
+        seed, generated, generated_eval):
+    """The realism assertion, and the one that would catch a silent revert.
+
+    BRIEF Sec 3.4 lists `created_at != settled_at != bank value date` as one of
+    the two structural difficulties of this domain. The generator used to copy
+    `settled_on` straight into `value_date`, which made the settlement date a
+    field the reconciler could rely on absolutely -- a property no bank statement
+    has, and the one the whole held-out Tier 2 result rested on.
+
+    Asserted as "some credits drift", not "this many", so a change to the lag rate
+    does not break it while a revert to copying does.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = load_all(data_dir)
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+
+    drifts = []
+    for edge in truth.edges:
+        if edge.kind != "bank_to_settlement":
+            continue
+        credit = repo.bank.get(edge.src_uid)
+        settlement = repo.settlements.get(edge.dst_uid)
+        if credit and settlement:
+            drifts.append((credit.value_date - settlement.created_at).days)
+
+    assert any(d > 0 for d in drifts), (
+        "every credit posted on its settlement's own date -- the bank statement is "
+        "restating the gateway's date, which is the C-2(a) simplification returning")

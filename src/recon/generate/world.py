@@ -74,6 +74,10 @@ class AnomalyRates:
     for what they actually produced.
     """
 
+    # Share of settlements whose credit posts one business day after the transfer
+    # was initiated rather than the same day. A bank's posting behaviour, not an
+    # anomaly: nothing is wrong with either outcome and neither is a break.
+    posting_lag_one_day_bps: int = 4500
     # applied per book entry / payment line
     book_amount_mismatch_bps: int = 400
     duplicate_payment_bps: int = 90
@@ -188,6 +192,35 @@ class LineItem:
         return int(self.credit) - int(self.debit)
 
 
+SATURDAY = 5
+
+
+def next_business_day(day: date) -> date:
+    """Roll a date forward off a weekend. Banks do not post value on Sat or Sun."""
+    while day.weekday() >= SATURDAY:
+        day += timedelta(days=1)
+    return day
+
+
+def posted_value_date(settled_on: date, lag_business_days: int) -> date:
+    """When a transfer initiated on `settled_on` actually posts to the account.
+
+    BRIEF Sec 3.4 lists `created_at != settled_at != bank value date` as one of the
+    two structural difficulties, and the generator had them identical: `derive_bank`
+    copied `settled_on` straight into `value_date`. That made the settlement date a
+    field the reconciler could rely on absolutely, which is not a property any bank
+    statement has.
+
+    The mechanism is deliberately dull, because it is dull in reality: the transfer
+    is initiated, it posts the same or the next business day, and a value date never
+    lands on a weekend.
+    """
+    day = next_business_day(settled_on)
+    for _ in range(lag_business_days):
+        day = next_business_day(day + timedelta(days=1))
+    return day
+
+
 @dataclass(frozen=True, slots=True)
 class Settlement:
     settlement_id: str
@@ -209,6 +242,9 @@ class Settlement:
     # `created`, `processed` or `failed`; a failed transfer produces no credit and
     # says so, which is a different fact from a credit we simply cannot find.
     status: str = "processed"
+    # When the credit actually posted. NOT `settled_on`: the transfer is initiated
+    # on the settlement date and lands on the same or the next business day.
+    credit_value_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +353,7 @@ def build_world(config: GenConfig) -> World:
     _inject_slab_and_gst_anomalies(world)
     _build_reserve(world)
     _close_settlements(world)
+    _post_bank_credits(world)
     _inject_bank_anomalies(world)
     _inject_failed_settlements(world)
     _inject_stale_totals(world)
@@ -784,6 +821,22 @@ def _close_settlements(world: World) -> None:
                 "for the payment volume in a cycle")
 
 
+def _post_bank_credits(world: World) -> None:
+    """Give every settlement the date its credit actually posted.
+
+    Runs before the bank anomalies so that a stray or duplicate credit can be
+    dated against a REAL posting rather than against the settlement date, which
+    is not a date the bank statement carries at all.
+    """
+    config = world.config
+    rng = _stream(config.seed, "posting")
+    for index, settlement in enumerate(world.settlements):
+        lag = 1 if _fires(rng, config.anomalies.posting_lag_one_day_bps) else 0
+        world.settlements[index] = replace(
+            settlement,
+            credit_value_date=posted_value_date(settlement.settled_on, lag))
+
+
 def _inject_bank_anomalies(world: World) -> None:
     """Anomalies that live on the bank side of the world."""
     config = world.config
@@ -805,7 +858,8 @@ def _inject_bank_anomalies(world: World) -> None:
 
     # A credit in the bank with no settlement behind it: another payer entirely.
     for _ in range(anomalies.unmatched_bank_credit_count):
-        day = config.start_date + timedelta(days=rng.randrange(config.n_days))
+        day = next_business_day(
+            config.start_date + timedelta(days=rng.randrange(config.n_days)))
         stray_utr = _utr(rng)
         world.extra_bank_credits.append(ExtraBankCredit(
             bank_ref=bank_ref_for_utr(stray_utr),
@@ -824,7 +878,9 @@ def _inject_bank_anomalies(world: World) -> None:
         source = live[rng.randrange(len(live))]
         world.extra_bank_credits.append(ExtraBankCredit(
             bank_ref=bank_ref_for_utr(source.utr, "d"),
-            value_date=source.settled_on,
+            # A double posting lands on the day the original did, not on the day
+            # the gateway initiated the transfer.
+            value_date=source.credit_value_date or source.settled_on,
             amount=source.amount,
             utr=source.utr,
             anomaly=ExceptionType.DUPLICATE_UTR,

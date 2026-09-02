@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from recon.domain.graph import EdgeKind, EdgeStatus, Tier
+from recon.domain.rates import BANK_POSTING_WINDOW_DAYS
 from recon.domain.truth import GroundTruth
 from recon.ingest.load import load_all
 from recon.resolve import pipeline
@@ -164,3 +165,60 @@ def test_a_failed_settlement_is_never_also_double_posted(
         assert not overlap, (
             f"credit {ref} duplicates a transfer for a settlement whose status is "
             "failed; that world cannot exist")
+
+
+# --- C-2(a): the window replaces the exact date, and stays a window ----------
+
+@pytest.mark.parametrize("seed", ("dev", "eval"))
+def test_corroboration_never_matches_a_credit_that_predates_its_settlement(
+        seed, generated, generated_eval, tmp_path_factory):
+    """The window is asymmetric, and that asymmetry is load-bearing.
+
+    A credit may post on the settlement date or after it, never before: money
+    cannot arrive before the transfer that sent it was initiated. A symmetric
+    +/- window would be a tolerance chosen for convenience rather than a statement
+    about settlement mechanics, and it would double the candidate set for nothing.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = load_all(data_dir)
+    result = pipeline.run(data_dir, tmp_path_factory.mktemp("window") / seed)
+
+    for edge in result.edges:
+        if edge.established_by is not Tier.T2_CANDIDATE:
+            continue
+        credit = repo.bank[edge.src_uid]
+        settlement = repo.settlements[edge.dst_uid]
+        drift = (credit.value_date - settlement.created_at).days
+        assert drift >= 0, (
+            f"{edge.src_uid} was linked to {edge.dst_uid} but posted {-drift} days "
+            "BEFORE that settlement was initiated")
+        assert drift <= BANK_POSTING_WINDOW_DAYS, (
+            f"{edge.src_uid} was linked {drift} days after {edge.dst_uid}, outside "
+            f"the {BANK_POSTING_WINDOW_DAYS}-day posting window")
+
+
+def test_corroboration_still_requires_the_amount_to_match_to_the_paise(
+        generated_eval, tmp_path):
+    """The window relaxed the DATE. It must not have relaxed the money.
+
+    D-027 refuses a tolerance on an amount, because an arithmetic proof downgraded
+    to a score is the anti-pattern BRIEF Sec 9 names. Shifting every credit by one
+    paise must therefore take Tier 2 to zero links, not to approximate ones.
+    """
+    repo = load_all(generated_eval)
+    for ref, credit in list(repo.bank.items()):
+        repo.bank[ref] = credit.model_copy(update={"amount": credit.amount - 1})
+
+    from recon.audit.log import AuditLog
+    from recon.resolve import tier0, tier2
+
+    audit = AuditLog(run_id="paise", rule_version="test")
+    edges, exceptions = tier0.resolve(repo, audit)
+    before = len([e for e in edges if e.established_by is Tier.T2_CANDIDATE])
+    edges, exceptions = tier2.resolve(repo, edges, exceptions, audit)
+    after = [e for e in edges if e.established_by is Tier.T2_CANDIDATE]
+
+    assert before == 0
+    assert not after, (
+        f"{len(after)} credits corroborated while every amount was one paise short; "
+        "the money comparison has acquired a tolerance")
