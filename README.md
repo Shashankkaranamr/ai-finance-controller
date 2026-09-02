@@ -34,7 +34,7 @@ seen.** Every figure below is reproduced by `python -m recon demo` and `python -
 | **Reconciliation statement** | **foots to zero** | **foots to zero** |
 | Throughput | 3,326 records in ~0.4 s | 3,434 records in ~0.4 s |
 | Determinism | byte-identical `metrics.json` across two runs, a regeneration **and a fresh clone** | same |
-| Tests | **258**, green on a clean clone with `data/` absent | — |
+| Tests | **263**, green on a clean clone with `data/` absent | — |
 
 ### The ablation — what each tier is actually worth
 
@@ -86,7 +86,7 @@ acknowledged generator gaps and re-measured everything, and a schema-repair incr
 that fixed a live defect (F-018) and added the LLM's second fenced job (D-036). This is an
 incremental build:
 [PLAN.md](PLAN.md) records every decision and what each one ruled out · [RUN_LOG.md](RUN_LOG.md) has
-the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has eighteen real
+the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has nineteen real
 dated incidents · [ARCHITECTURE.md](ARCHITECTURE.md) is the design walkthrough.
 
 ---
@@ -124,7 +124,7 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 258 tests
+pytest                                              # 263 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
@@ -480,9 +480,23 @@ renamed:
 zero on every run for eight days. It is zero **conditional on the inputs loading**, and nothing before
 this made that condition visible. The guarantee was never as unconditional as this README implied.
 
-**What is not claimed:** every number above comes from test doubles — a truthful mapper, a hostile
-one, three structurally invalid ones. That measures **the fence**. It says nothing about how often a
-real model proposes a correct mapping, and that number appears nowhere (D-022, D-036).
+**Run live once, on 03 Sep.** `claude-haiku-4-5`, one call, 3.9 s. The model proposed 26 entries with
+exactly one non-identity mapping — `entity_ref → entity_id` — and it was right. All four gates passed,
+1,789 rows recovered, and the run landed on **18/23 with false clear 0/187**: byte-for-byte its
+undrifted figures. Its stated reason cited the *value*, not the column name:
+
+> *"The observed column 'entity_ref' contains a settlement reference identifier
+> ('setlodp_gOFf7SqYMFy5PU') and maps to the target field 'entity_id'…"*
+
+which is the behaviour the job needs, because a renamed column is exactly the case where the name
+cannot be trusted.
+
+**What that is not.** It is **one mapping, one view, one seed — n=1.** A smoke test that returned a
+correct answer, not a measurement of how often the model is right. Quoting "100%" from this would be
+quoting 1/1. A real accuracy figure needs many drift shapes and a held-out set of renames the prompt
+was never written against; none of that exists, and none of it will before the deadline. **The claim
+this project makes is about the fence, not the model** — a wrong mapping still cannot reach the
+ledger, and that came from the gates, not from the model being right on the day.
 
 ### Determinism, and where it stops
 
@@ -589,5 +603,5 @@ src/recon/
 
 [PLAN.md](PLAN.md) — every decision and what it ruled out ·
 [RUN_LOG.md](RUN_LOG.md) — measured results per gate ·
-[FAILURE_LOG.md](FAILURE_LOG.md) — eighteen real incidents, dated as they happened ·
+[FAILURE_LOG.md](FAILURE_LOG.md) — nineteen real incidents, dated as they happened ·
 [STUDY_PLAN.md](STUDY_PLAN.md)

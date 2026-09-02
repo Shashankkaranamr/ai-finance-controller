@@ -1486,3 +1486,87 @@ correct mappings, and that number is claimed nowhere. With a key, one run produc
 The honest summary: *we do not know how often the model is right, and we have proven that it does not
 matter for safety — a wrong mapping cannot reach the ledger.* That is the same claim Tier 3 makes, on a
 verifier that is strictly stronger.
+
+---
+
+## LIVE map_schema run · 03 Sep 2026
+
+**The first live `map_schema` call this project has made.** One run, no re-rolls, reported exactly as
+returned — the same protocol as the 01 Sep `parse_narration` run. `claude-haiku-4-5`, held-out seed,
+`settlement_lines.jsonl` with `entity_id` renamed to `entity_ref`. Four calls, 9.7 s wall clock.
+
+The harness (`scripts/live_map_schema.py`) was proven against an in-process stub **before** any
+billable call, because "one run, no re-rolls" only means something if a harness bug cannot force a
+second one.
+
+### `map_schema` — 1 call, 3,880 ms, ACCEPTED
+
+All four gates passed on the first attempt. The model proposed 26 entries with exactly one
+non-identity mapping, and it was the right one:
+
+```
+entity_ref -> entity_id      (the other 25 columns map to themselves)
+```
+
+Its stated reason cited the **value**, not the column name:
+
+> "The observed column 'entity_ref' contains a settlement reference identifier
+> ('setlodp_gOFf7SqYMFy5PU') and maps to the target field 'entity_id', as all other columns match
+> their target field names directly."
+
+That is the prompt's instruction followed literally — *use the sample row's VALUES to decide what each
+column really holds* — and it is the behaviour the job needs, because a renamed column is precisely
+the case where the name cannot be trusted.
+
+| | measured |
+|---|---|
+| rows recovered | **1,789** (0 left quarantined) |
+| `blocked_bad_mapping` | **0** |
+| explanation rate | **18/23** |
+| false clear, in remit | **0/187** |
+| linkage precision | **100.00%** (3,506/3,506) |
+| statement foots | YES |
+
+**Byte-for-byte the clean-eval figures.** The 02 Sep ablation predicted a verified repair would return
+the run to exactly what it would have been; a live model did it.
+
+### `parse_narration` — 3 calls, 0 accepted, and that is the predicted result
+
+These ran as a by-product of running the pipeline whole rather than stubbing around it, which is what
+makes this the same protocol. The oracle ceiling on this seed is **0**, so there was nothing available
+to win, and the live model won exactly that:
+
+| credit | narration | proposed | outcome |
+|---|---|---|---|
+| `bc_1794377993` | `RTGS CR RAZORPAY18673336272o4fxgSETTLEMENT` | `1867333627o4fxg` | `blocked_hallucination` |
+| `bc_2544693262` | `NEFT-RAZORPAYSOFTWAREPVTLT-UTR8922497314` | `8922497314` | `blocked_unverifiable` |
+| `bc_2544693262d` | *(same narration — the duplicate-UTR pair)* | `8922497314` | `blocked_unverifiable` |
+
+**The hallucination is real and it is the documented `rtgs_no_delimiter` failure.** The true run is
+`18673336272o4fxg`; the model returned `1867333627o4fxg` — it **dropped the `2`** while splitting a
+delimiter-free run, so the proposal genuinely is not a substring of the narration. `_is_faithful_reading`
+classified it correctly. The two `blocked_unverifiable` returned exactly the characters the truncated
+statement contains; the reference is not in the document, which is not a model error. Both
+classifications match the 01 Sep findings on the same two families.
+
+### What this does and does NOT establish
+
+**Establishes:** the live path works end to end; the request shape is right; the four gates admit a
+correct mapping rather than being a wall; a real model, given only column names, target field names
+and one sample row, reasoned from a *value* to the right answer; and the recovered run is numerically
+identical to the undrifted one.
+
+**Does NOT establish accuracy.** This is **one mapping on one view on one seed** — n=1. It is a
+smoke test that produced a correct answer, not a measurement of how often the model is right. Anyone
+quoting "100%" from this is quoting 1/1, and the honest phrasing is *"the first live call returned a
+correct mapping"*. A real accuracy figure needs many views, many drift shapes, and a held-out set of
+renames the prompt was not written against — none of which exists, and none of which will be built
+before the deadline.
+
+**Unchanged by this run:** the fence is what is measured and what is claimed. A wrong mapping still
+cannot reach the ledger, and that property came from the gates, not from the model being right today.
+
+### Cost
+
+4 calls, 9.7 s, Haiku tier. `map_schema` was 3,880 ms of it — the largest payload the project sends
+(26 column names, 26 target fields, one full sample row) and still a single short completion.

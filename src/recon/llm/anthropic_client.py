@@ -17,9 +17,10 @@ run"). That run is what produced `_unfence` and the 600-character error budget
 below. This docstring previously said the request shape had never been sent; that
 was true when it was written and stopped being true the next day.
 
-`map_schema` has NOT been sent. It is wired below against the same narrow surface
--- one `messages.create` call, a system prompt, `json.loads` on the text block --
-and until a live run happens that is a claim about the code, not a measurement.
+`map_schema` HAS now been sent: one call on 03 Sep 2026, same model, and the
+mapping was accepted on the first attempt (RUN_LOG, "LIVE map_schema run"). That
+is one mapping on one view -- a smoke test that came back correct, not an accuracy
+measurement, and it is worded that way everywhere it appears.
 
 Either way it is
 survivable by construction: every proposal this class returns is re-verified by

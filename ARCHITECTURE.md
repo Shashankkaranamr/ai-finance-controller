@@ -14,7 +14,7 @@ pip install -e ".[dev]"          # pydantic + pytest, nothing else
 python -m recon demo             # dev seed, ~50 s from a cold clone
 python -m recon eval             # the held-out seed
 python -m recon ablation --seed eval
-pytest                           # 258 tests
+pytest                           # 263 tests
 ```
 
 No network, no API key, no `make`, no `uv`. The LLM is opt-in (`--llm`).
@@ -266,6 +266,10 @@ re-validates perfectly and is arithmetic nonsense.
 `tests/test_schema_repair_fence.py` asserts both directions, as the Tier 3 fence tests do: a hostile
 mapping is blocked with the rows left quarantined, and a truthful one is **accepted** — a gate that
 rejects everything is a wall, not a fence.
+
+**Run live once, 03 Sep**: `claude-haiku-4-5` proposed the correct mapping on the first attempt and
+all four gates admitted it, recovering 1,789 rows. That is **n=1** — a smoke test that came back
+correct, not an accuracy figure, and it is the fence rather than the model that this design claims.
 
 **Measured on a drifted view**, rules-only in-remit false clear is **190/195 on dev and 180/187 on
 eval**; a verified repair returns the run to **17/23 and 0/195**, **18/23 and 0/187** — byte-for-byte

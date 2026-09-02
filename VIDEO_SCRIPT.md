@@ -57,7 +57,7 @@ next block's visual.
 
 ---
 
-## 0:35–1:15 · Architecture: tiers, and why the LLM is fenced · *92 words*
+## 0:35–1:15 · Architecture: tiers, and why the LLM is fenced · *120 words*
 
 > So it's a graph of typed edges — three cardinalities, each with its own denominator. Merging them is
 > how you get an indefensible match rate.
@@ -66,8 +66,10 @@ next block's visual.
 > a second, independent opinion — a contracted rate card — so it types a rolling reserve, and catches
 > the gateway overcharging you.
 >
-> **Tier 3 is the LLM, with one job:** read a UTR out of a narration no parser was written for. Never
-> picks between settlements, never touches an amount.
+> **The LLM gets two jobs, both fenced.** Tier 3 reads a UTR out of a narration no parser was written
+> for. And at ingest, when a bank renames a column and the whole file fails validation, it proposes
+> the mapping — which is proved before anything uses it. Never picks between settlements, never
+> touches an amount.
 
 **On screen:** same diagram, now pan right to the tier panel and the strip along the bottom —
 *T0 links it · T3 links it when the narration defeats the parser · T1 explains the money*.

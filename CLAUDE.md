@@ -44,7 +44,7 @@ estimates. If you feel the urge to plan the whole build, re-read §13.1.
 
 **Increments 0–3 — CLOSED 25 Aug – 01 Sep 2026.** · **Audit response — 01 Sep.** ·
 **Realism + review response — 02 Sep.** · **Schema repair — 02 Sep.**
-**258 tests green.** Next: **Increment 6 — artifacts. Protected.**
+**263 tests green.** Next: **Increment 6 — artifacts. Protected.**
 
 Increments 2 and 3 were built **autonomously overnight**; D-018 through D-023 were taken without
 review and remain marked open for override in the Decisions Log.
@@ -83,9 +83,12 @@ Subset-sum search (**CUT**, D-016/D-027) · multi-gateway (**CUT** D-016; experi
 02 Sep, below) · second merchant (**CUT**) · FX (**CUT**) · TDS 194-O (out by persona) · any UI ·
 `draft_note` and rate-card extraction (designed, verifiers identified, deferred — D-036).
 
-**No API key in this environment**, so the LLM's real accuracy — extraction *and* mapping — is
-**unmeasured and claimed nowhere** (D-022, D-036). Every published LLM number comes from test doubles
-(oracle, hostile, structurally invalid) and measures **the fence**, never the model.
+**LLM accuracy is still not claimed.** Both jobs have now been run live exactly once —
+`parse_narration` on 01 Sep (22 narrations) and `map_schema` on 03 Sep (1 mapping, accepted first
+attempt). Those are smoke tests, not measurements: **n=1 for mapping**, and quoting "100%" from it
+would be quoting 1/1. Everything the project *claims* is about **the fence**, which is measured with
+test doubles (oracle, hostile, structurally invalid) and holds regardless of whether the model is
+right (D-022, D-036).
 
 ### The second-gateway experiment — closed 02 Sep, code stashed
 
@@ -112,7 +115,7 @@ until it is signed off.
 ./.venv/Scripts/python.exe -m recon eval     # the HELD-OUT seed: different world AND narrations
 ./.venv/Scripts/python.exe -m recon generate --seed dev --days 88
 ./.venv/Scripts/python.exe -m recon run --seed dev
-./.venv/Scripts/python.exe -m pytest         # 258 tests; use bare pytest, NOT -q (addopts already has it)
+./.venv/Scripts/python.exe -m pytest         # 263 tests; use bare pytest, NOT -q (addopts already has it)
 ```
 
 The venv is at `.venv/`. `make` and `uv` are **not installed** on this machine — `python -m recon`

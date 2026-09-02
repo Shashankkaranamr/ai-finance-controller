@@ -554,3 +554,75 @@ a drifted view, and nothing here recovers the rows. Recovering them needs a mapp
 column names to the schema, which no rule can supply for a name it has not seen. That is the argument
 for the next increment, and it is the first time in this project that the LLM has had a defensible
 job outside narration parsing.
+
+---
+
+### F-019 · 02–03 Sep 2026 · The live adjudicator never knew the second job existed, and a broad `except` disguised it
+
+**What broke.** Two defects in the same method, stacked, both on the path to the first live
+`map_schema` call. Neither was caught by 258 passing tests, and the second was created *while fixing
+the first*.
+
+**Bug 1 — no job dispatch.** `AnthropicAdjudicator.adjudicate()` ignored `request.job` entirely. It
+read `payload["narration"]` unconditionally, sent the narration system prompt, and returned
+`{utr, counterparty, reference}`. A `map_schema` request carries no `narration` key, so the call would
+have gone to the API as an **empty user message** under the wrong prompt, come back with no `mapping`,
+and been scored `blocked_bad_mapping` by the verifier.
+
+That is the dangerous shape. It would not have crashed, or errored, or looked wrong. It would have
+produced **a number that reads as a measurement of the model and is actually a measurement of our own
+wiring** — and it would have gone into the RUN_LOG, the README and the video as the model failing the
+fence.
+
+**Bug 2 — a `NameError` disguised as an API failure.** Fixing bug 1 introduced a variable rename in
+the dispatch and left the call site reading the old name:
+
+```python
+messages=[{"role": "user", "content": narration}],   # `narration` no longer exists
+```
+
+The deliberately broad `except Exception` caught the `NameError` and returned it as a clean, typed
+`AdjudicationResult(ok=False, ...)`. **Every live call would have "declined"**, `calls_declined` would
+have counted 4, and the run summary would have reported an adjudicator that was unavailable or
+failing. The API would never have been reached at all.
+
+**Cause.** `map_schema` was built against the `Adjudicator` protocol and proved with test doubles —
+a truthful mapper, a hostile one, three structurally invalid ones. Every one of those satisfies the
+protocol without going near `AnthropicAdjudicator`. **The protocol has two implementations that
+matter and the suite only ever exercised the fake one.** The tests were a complete specification of
+the *interface* and said nothing about whether the real client honoured it.
+
+Bug 2 is the module's own documented hazard landing on the author. The comment justifying the 600-
+character error budget reads *"a degrade path that hides why it degraded is only half a degrade
+path"* — written after a truncated workspace-id error on 01 Sep. The same handler then hid a defect
+in our own code behind the same door.
+
+**Recovery.**
+1. Dispatch on `request.job`. An unwired job (`rank_candidates`, `classify_residual`) declines **by
+   name without billing a call**; an empty payload is refused as our bug rather than sent to earn a
+   400 recorded against the model.
+2. `parse_narration` deliberately untouched — the 01 Sep live run is published, and drift there would
+   stop that RUN_LOG entry describing the code. A test now pins the exact bytes it sends.
+3. Job-name constants moved to `llm/client.py`, the seam that owns the `job` field. Importing a
+   resolver into the vendor client to learn a string inverts the layering.
+4. `tests/test_adjudicator_dispatch.py` — 5 tests against a stub transport, no key, no network. These
+   are what found bug 2, within a minute of being written.
+
+**Measured after.** 263 tests. `metrics.json` byte-identical on a clean run. The live run went out on
+03 Sep and the `map_schema` mapping was **accepted on the first attempt** — see RUN_LOG.
+
+**Standing consequence.** Two rules, and the second is the one with teeth.
+
+> **A protocol with more than one implementation needs a test per implementation. Test doubles prove
+> the interface; they cannot prove that anything real honours it.**
+
+> **A broad `except` that converts our own bugs into the vendor's failures makes a defect in our code
+> indistinguishable from an API problem in the numbers we publish.** `calls_declined` conflated "the
+> API failed" with "we called it wrong". The broad handler stays — Sec 8 requires the batch to
+> complete — but everything it can catch that is *ours* must now be caught before it: the job is
+> validated, and an empty payload never leaves the process.
+
+This is the fourth instance in three days of the same underlying shape as F-016, F-017 and F-018: a
+component behaving correctly in isolation while contradicting, or silently failing to honour, what
+another component had already established. F-018's rule was *a count is a diagnostic, not a control*.
+This one's is that **a counter is only evidence about the thing it names.**
