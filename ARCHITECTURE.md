@@ -211,6 +211,84 @@ here rather than left for a reviewer to find.
 
 ---
 
+## 3a. Monotonic exclusion — a principle found the hard way, twice
+
+**The claim:** *a tier may add explanation. It may never widen the candidate set, relax a gate, or
+contradict a fact a lower tier has already established from the sources. A constraint established at
+tier N holds at every tier above N.*
+
+This is not a design note written in advance. It is the shape of two defects found on 02 Sep, one
+day apart, in two different tiers:
+
+| | What happened | Cost, measured |
+|---|---|---|
+| **F-016** | Tier 0 marks a bank edge explained only when the decomposition closes **and** the credit ties out to the settlement's reported total. Tier 1 recomputed that as the first conjunct alone, then overwrote the status. | Journal entries posted for two settlements per seed whose own report contradicted the bank, at Rs 2,238.57 and Rs 3,121.71 |
+| **F-017** | Tier 0 reads `status` and queues a non-`processed` settlement as `SETTLEMENT_FAILED` — the money never left. Tier 2's candidate pool never consulted `status` and corroborated a credit against one anyway. | eval false clear **0.00% -> 0.53%**, linkage precision **100.00% -> 99.97%** — the first movement in either, ever |
+
+**The structural cause is in the grain model, and it is worth a reviewer's attention.** `ReconEdge`
+lets any tier overwrite an edge's `status`, and **nothing carries forward what an earlier tier
+concluded about a *unit***. Tier 0 knows "this settlement failed" and "this credit does not tie out";
+that knowledge lives only inside exception records, which no later tier reads. Both defects are that
+one gap, reached from opposite directions — and the same gap is why both were invisible to a green
+test suite.
+
+**Why both were undetectable until 02 Sep.** Neither could be triggered by any data the generator
+could produce. `settlement.amount` was computed from the line items the resolver re-sums, and the bank
+credit was copied from it, so the tie-out could not fail; `status` was hard-coded to `"processed"`, so
+the exclusion never existed. Two of the acknowledged simplifications in §4 were not cosmetic. They
+were holding two live defects out of reach of every test in the suite.
+
+> **An identity that cannot fail is not a passing test. It is an untested region with a green light
+> over it.**
+
+**How it is guarded.** Each instance has a parametrised regression test asserting the *property* —
+"nothing posts while the report disagrees with the cash", "no credit links to a settlement that never
+paid out" — rather than a count, so they survive a change in injection rates. Those pin the two known
+instances. The general guard is the **tier-prefix differential** (§3b): the pipeline is re-run at each
+tier prefix and neither linkage precision nor in-remit false clear may worsen as a tier is added. It
+needs no predicate written in advance, which is the property that matters for the third instance.
+
+### 3b. The tier-prefix differential — the guard for the instance we have not found yet
+
+`pipeline.run` takes a `max_tier`, so the same data can be resolved with successively more of the
+resolver switched on. Two properties are then asserted across every adjacent pair of prefixes, on
+**both** seeds:
+
+| Assertion | The failure it names |
+|---|---|
+| The count of **wrong links** may only go down | a tier widened the candidate set into an edge a lower tier correctly refused |
+| A **real break flagged at prefix N is still flagged at prefix N+1** | a tier explained away something real |
+
+Neither needs a predicate written in advance, which is the property that matters: the third instance
+will be in a tier that does not exist yet. A third assertion checks that the prefix runs actually
+differ, so the guard cannot pass vacuously if a refactor ignores `max_tier` — the F-011 failure one
+level along.
+
+**It was validated by re-introducing F-017 rather than by reasoning about it.** With both fixes
+reverted and the seeds regenerated, it fails on the held-out seed with:
+
+```
+eval: tier 2 silenced 1 real break(s) that tier 1 had flagged: ['bc_1582830180d']
+```
+
+**What it does not cover, stated plainly.** It would not have caught F-016, which produced no wrong
+link and silenced no exception — it marked an edge explained that should not have been, and only the
+tie-out predicate sees that. A guard whose blind spot is documented is worth more than one whose
+limits are unexamined.
+
+Note that `metrics.json`'s ablation table is still a **group-by over edges, not a set of re-runs** — a
+table produced by re-running can drift from the run it describes. `max_tier` exists for the guard,
+which needs genuine prefixes because the failure it hunts is a later tier acting on the graph at all.
+
+**Verify:**
+- `test_tier1_does_not_post_a_settlement_whose_report_contradicts_the_bank`
+- `test_corroboration_never_links_a_settlement_that_never_paid_out`
+- `test_a_failed_settlement_is_never_also_double_posted`
+- `test_no_tier_introduces_a_wrong_link` · `test_no_tier_silences_a_break_an_earlier_prefix_found`
+- `test_the_prefix_runs_actually_differ`
+
+---
+
 ## 4. Honest absences
 
 Not oversights. Each is a dated decision recording what it ruled out.

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..audit.log import AuditLog, run_id_for
-from ..domain.graph import EdgeKind, EdgeStatus, ReconEdge
+from ..domain.graph import BUILT_TIER, EdgeKind, EdgeStatus, ReconEdge
 from ..domain.identities import RULE_VERSION
 from ..domain.truth import GroundTruth
 from ..ingest.load import Repository, load_all
@@ -46,7 +46,21 @@ class RunResult:
 
 
 def run(data_dir: Path, out_dir: Path,
-        adjudicator: Adjudicator | None = None) -> RunResult:
+        adjudicator: Adjudicator | None = None,
+        max_tier: int = BUILT_TIER) -> RunResult:
+    """Resolve `data_dir` and write artifacts to `out_dir`.
+
+    `max_tier` runs only the tiers at or below N. The full run is the default and
+    nothing in the shipped path passes it; it exists so the tier-prefix
+    differential (`tests/test_tier_prefix_monotonicity.py`) can re-run the same
+    data with successively more of the resolver switched on and assert that
+    adding a tier never makes an earlier correct answer wrong.
+
+    The ablation table in `metrics.json` remains a group-by over edges, not a set
+    of re-runs -- a table produced by re-running can drift from the run it
+    describes. This parameter is for the GUARD, which needs genuine prefixes
+    because the failure it looks for is a later tier acting on the graph at all.
+    """
     # perf_counter_ns, not perf_counter: integer nanoseconds keep this module
     # float-free, which is what lets tests/test_no_floats.py assert the property
     # over the WHOLE package rather than over a hand-picked "money path".
@@ -58,7 +72,7 @@ def run(data_dir: Path, out_dir: Path,
 
     repo = load_all(data_dir)
     audit.record("ingest_complete", records=repo.total_records,
-                 quarantined=len(repo.quarantined))
+                 quarantined=len(repo.quarantined), max_tier=max_tier)
     for bad in repo.quarantined:
         audit.record("row_quarantined", **bad.to_json())
 
@@ -80,7 +94,8 @@ def run(data_dir: Path, out_dir: Path,
     # deterministic evidence could not place. Asking it about a credit two exact
     # fields already identify would inflate its measured contribution and cost
     # money for nothing (D-027).
-    edges, exception_records = tier2.resolve(repo, edges, exception_records, audit)
+    if max_tier >= 2:
+        edges, exception_records = tier2.resolve(repo, edges, exception_records, audit)
 
     # Tier 3 BEFORE Tier 1, because they do different jobs in a fixed order: the
     # adjudicator can only establish a LINKAGE, and the money on any edge it
@@ -88,11 +103,13 @@ def run(data_dir: Path, out_dir: Path,
     # after Tier 1 would leave LLM-linked credits permanently unexplained, and
     # letting it run instead of Tier 1 would be invariant 8 violated outright.
     cache = ResponseCache()
-    edges, exception_records = tier3.resolve(
-        repo, edges, exception_records, adjudicator, cache, llm, audit)
+    if max_tier >= 3:
+        edges, exception_records = tier3.resolve(
+            repo, edges, exception_records, adjudicator, cache, llm, audit)
 
-    edges, tier1_exceptions = tier1.resolve(repo, edges, audit)
-    exception_records.extend(tier1_exceptions)
+    if max_tier >= 1:
+        edges, tier1_exceptions = tier1.resolve(repo, edges, audit)
+        exception_records.extend(tier1_exceptions)
 
     # An exception is a statement about the FINAL state of the graph, not about
     # what some tier believed on the way there. Tier 0 raises
