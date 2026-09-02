@@ -1,8 +1,11 @@
 # AI Finance Controller — three-way settlement reconciliation
 
-**Razorpay Buildathon, Track 04.** Status: **Increments 0–3 complete** — walking skeleton, faithful
-generator, Tier 1 arithmetic decomposition, and the LLM fenced into narration parsing.
+**Razorpay Buildathon, Track 04.** Status: **Increments 0–3 complete**, plus a realism increment on
+02 Sep that closed three acknowledged gaps in the generator and re-measured everything.
 This is an incremental build: [PLAN.md](PLAN.md) records every decision and what each one ruled out.
+
+**If you read one thing, read [Is "the LLM adds nothing" a fact, or an artifact of our own data?](#is-the-llm-adds-nothing-a-fact-or-an-artifact-of-our-own-data)**
+— we tested our own headline finding against our own simulator and published which half survived.
 
 ---
 
@@ -38,7 +41,7 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 184 tests
+pytest                                              # 207 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
@@ -76,14 +79,15 @@ Four grains, each with its own denominator (`src/recon/domain/graph.py`, `EDGE_S
 |---|---|---|
 | **0** | Exact-key joins; §3.2 identities over the values the report *states*; flags, dates, cardinality | built |
 | **1** | Types the whole deduction stack against a contracted rate card; detects off-contract fees | built |
-| **2** | Corroborates an unmatched credit on exact `(amount, value_date)` | built |
+| **2** | Corroborates an unmatched credit on an exact amount inside the bank's posting window | built |
 | **3** | LLM extracts a UTR from a narration no parser was written for | built, fenced |
 
-**Tier 2 is not subset-sum, and subset-sum stays cut** (D-016, D-027). Searching manufactured
+**Tier 2 is not subset-sum, and subset-sum stays cut** (D-016, D-027, D-033). Searching manufactured
 ambiguity *in order to* give the LLM something to adjudicate is the §9 "agent as marketing"
-anti-pattern. What Tier 2 does instead is exact: a credit links only when `(amount, value_date)`
-resolves to one settlement **and** that settlement is claimed by one credit. No tolerance, no
-scoring, every tie refused. It exists because an audit showed those two columns were already in
+anti-pattern. What Tier 2 does instead is exact on the money: a credit links only when its amount matches a
+settlement **to the paise**, that settlement's posting window contains the credit's value date, and
+the pairing is unique in both directions. No tolerance on an amount, no scoring, every tie refused
+(D-033). It exists because an audit showed those two columns were already in
 memory and being ignored — see the ablation below.
 
 ---
@@ -160,19 +164,26 @@ narration templates the parser has never seen.
 
 | | dev | eval (held out) |
 |---|---|---|
-| **Explanation rate · settlement coverage** | **83.33%** (20/24) · **90.91%** (20/22) | **83.33%** (20/24) · **90.91%** (20/22) |
-| **Decomposition closure** *(no linkage, no ground truth)* | **100.00%** (22/22) | **100.00%** (22/22) |
-| **Linkage precision** | **100.00%** | **100.00%** (3,508/3,508) |
-| …at the bank grain *(the one an adjudicator can reach)* | **20/20** | **20/20** |
-| Linkage recall | 99.97% | 99.97% |
-| Exception detection recall | 100.00% (192/192) | 100.00% (184/184) |
-| **False-clear, in remit** | **0.00%** (0/192) | **0.00%** (0/184) |
-| **Exception queue precision** *(raised breaks that are real)* | **94.61%** (193/204) | **92.89%** (183/197) |
-| Exception typing accuracy | 100.00% | 98.91% |
-| Intrinsic clean rate *(from ground truth)* | 89.12% | 89.46% |
-| Narration parse rate *(regex)* | 100.00% (24/24) | **8.33%** (2/24) |
-| Journal entries, all balanced | 20 | 20 |
+| **Explanation rate · settlement coverage** | **73.91%** (17/23) · **77.27%** (17/22) | **78.26%** (18/23) · **81.82%** (18/22) |
+| Money-weighted coverage | 77.06% | 82.16% |
+| **Decomposition closure** *(no linkage, no ground truth)* | **90.91%** (20/22) | **90.91%** (20/22) |
+| **Linkage precision** | **100.00%** (3,387/3,387) | **100.00%** (3,506/3,506) |
+| …at the bank grain *(the one an adjudicator can reach)* | **19/19** | **18/18** |
+| Linkage recall | 99.97% | 99.94% |
+| Exception detection recall | 100.00% (195/195) | 100.00% (187/187) |
+| **False-clear, in remit** | **0.00%** (0/195) | **0.00%** (0/187) |
+| **Exception queue precision** *(raised breaks that are real)* | **94.69%** (196/207) | **93.00%** (186/200) |
+| Exception typing accuracy | 100.00% | 98.93% |
+| Intrinsic clean rate *(from ground truth)* | 89.03% | 89.37% |
+| Narration parse rate *(regex)* | 100.00% (23/23) | **8.70%** (2/23) |
+| Journal entries, all balanced | 17 | 18 |
 | Reconciliation statement | **foots to zero** | **foots to zero** |
+
+**These numbers went DOWN on 02 Sep, and that is the system working.** Closing three acknowledged
+realism gaps in the generator (below) showed that two settlements per seed were being reported as
+fully explained when the settlement report contradicted itself, and journal entries were posting on
+them. Decomposition closure fell from 100% to 90.91% for the same reason. A headline that falls when
+the data gets more honest was measuring the wrong thing before.
 
 **Queue precision is published because its absence hid a real defect.** The suite measured false
 clear — what we missed — with genuine rigour, and never measured what we *raised* that was not real.
@@ -183,51 +194,111 @@ were in the bank file. Both directions are now published, per seed and per code 
 
 | Cumulative | dev | eval (held out) |
 |---|---|---|
-| T0 · narration join | **0.00%** (0/24) | 0.00% (0/24) |
-| + T1 · arithmetic | **83.33%** (20/24) | 0.00% (0/24) |
-| + T2 · (amount, date) corroboration | 83.33% | **83.33%** (20/24) |
-| + T3 · LLM | 83.33% | **83.33% — adds nothing** |
+| T0 · narration join | **0.00%** (0/23) | 0.00% (0/23) |
+| + T1 · arithmetic | **73.91%** (17/23) | 0.00% (0/23) |
+| + T2 · exact amount in the posting window | 73.91% | **78.26%** (18/23) |
+| + T3 · LLM | 73.91% | **78.26% — adds nothing** |
 
 **Tier 0 alone explains nothing on realistic data.** It finds the counterparty and proves the report
 is internally consistent — worth having — but on a merchant with a rolling reserve it cannot explain a
 single rupee of the gross-to-cash gap. The brief's thesis, that explaining the amount is the job, is a
 measured number here rather than a claim.
 
-The four unexplained credits on each seed are not decomposition failures: two credits with no
-settlement behind them, and a duplicate-UTR pair the resolver **deliberately declines to link**. Every
-settlement the tiers could reach, they closed.
+The credits neither tier explains are not decomposition failures: two with no settlement behind them,
+a duplicate-UTR pair the resolver **deliberately declines to link**, and the settlements whose own
+reported total contradicts their line items — where the arithmetic closes but nothing posts, by
+design.
 
-**The bottom row is the important one.** On the held-out seed, deterministic corroboration does all
-of it and the LLM adds zero — see below.
+---
 
-### The held-out seed used to report 0%, and that was our bug
+## Is "the LLM adds nothing" a fact, or an artifact of our own data?
 
-The regex extracts nothing there, so Tier 0 created no bank edge and the whole eval result was 0%.
-An adversarial audit showed why that was not a data problem: `(amount, value_date)` resolves 20 of 24
-held-out credits to exactly one settlement, using two columns the resolver had already loaded and
-declined to read. Tier 2 now reads them, and eval matches dev.
+This is the question a reviewer should ask, and on 02 Sep we went looking for the answer instead of
+defending the result. `ARCHITECTURE.md` §4 already listed what the simulator makes easier than
+reality. Three of those gaps were closed, one was **withdrawn as factually wrong**, and every number
+was re-measured. The rule was fixed in advance: only gaps already named could be closed, and no change
+could be justified by what it would do to the LLM's role.
 
-**Decomposition closure** remains published as a separate measurement — it asks whether the
-gross-to-net gap can be typed from the settlement report alone, with no linkage at all — and it is
-**100% on both seeds**. It is what let us tell an arithmetic failure from a linkage failure while the
-linkage was broken.
+**The answer is both, and the split is measurable.**
 
-### What Tier 1's 100% does and does not prove
+### The artifact half — and it was load-bearing
+
+`derive_bank` was copying the settlement's date straight into the bank row's `value_date`, while the
+brief's own §3.4 lists `created_at ≠ settled_at ≠ bank value date` as a structural difficulty of this
+domain. Credits now post on the settlement date or the next business day, never on a weekend.
+
+| eval, held out | before | realistic dates, Tier 2 unchanged | + windowed rule |
+|---|---|---|---|
+| Explanation rate | 18/23 | **4/23** | **18/23** |
+| Linkage precision | 100.00% | 100.00% | **100.00%** |
+
+Tier 2's exact `(amount, value_date)` join lost **14 of 18 links**. The earlier finding that a
+two-field exact join reproduced the entire held-out result rested, in part, on one copied field.
+
+### The fact half — and it is larger
+
+Under a rule that keeps the amount exact and allows the value date anywhere in the settlement's
+posting window (D-033), the held-out seed returns to **18/23 at 100% precision**. What carries
+corroboration is the **amount**, not the date: **22 of 22 settlement amounts are distinct on both
+seeds, the two closest ₹171.98 apart.** A mixed merchant's daily net settlement is an effectively
+random paise value, so that uniqueness is a property of settlement flows rather than of our simulator.
+
+For the same reason one listed caveat was **withdrawn rather than closed** (D-034). It claimed a real
+bank nets its charges out of the credit; for an inbound NEFT/RTGS/IMPS credit to an Indian merchant's
+account it does not, and the amounts tie out exactly. Implementing it would have made the world *less*
+like a real settlement flow.
+
+### The ceiling never rose
+
+The measurement that settles this needs no API key. An **oracle adjudicator** — a perfect extractor
+built from ground truth — is the upper bound on any model, so if the oracle adds nothing, no model can.
+
+| oracle headroom, credits a perfect extractor adds | dev | eval |
+|---|---|---|
+| before the realism increment | 0 of 24 | 1 of 24 |
+| after all three gaps closed | **0 of 23** | **0 of 23** |
+
+### The one place it does move, published because it is the honest half
+
+At the **linkage** grain the oracle is not zero. It takes the held-out bank grain from **18 to 20**,
+recovering the two settlements whose reported total is stale — beyond the reach of any amount-based
+rule, because the amount itself is the thing that is wrong. **The UTR is the only reference that does
+not depend on every amount being right, and that is the real-world argument for it, arriving here as
+a measurement rather than an assertion.**
+
+Those two links convert to **zero** additional explained settlements: the report still contradicts
+itself, so nothing posts. Both halves are published together, because the first without the second
+would overstate what extraction buys.
+
+**We stopped there.** Three gaps closed, the number did not move, and continuing to hunt for a fourth
+until it did would be tuning the data against the outcome — the one thing this project has avoided
+throughout.
+
+---
+
+### What Tier 1's closure does and does not prove
 
 Explained money splits **~49% schema-derived** (read from documented §3.1 fields the *gateway*
 asserts — `type`, `dispute_id` — which would read identically from a real report) and **~51%
 contract-derived** (from rate-card constants we also generated with).
 
 So the claim is exactly: **Tier 1 generalises across worlds, not across contracts.** The eval seed is
-a different world drawn from the *same* rate card, so 100% closure shows the rules apply to unseen
+a different world drawn from the *same* rate card, so closure on it shows the rules apply to unseen
 **instances**, not that they hold for a merchant on a different **contract**. Anything stronger would
 be overclaiming, and the split is published so the sentence can be checked.
+
+Closure is **90.91% (20/22) on both seeds**, not 100%. The two that miss are the settlements whose
+*reported* total was struck before one of their own line items posted: the gap between the line items
+and a stale total is not a deduction, so no arithmetic can type it, and the tier correctly declines to
+try. It reads as an arithmetic result and is a data one — which is why `ROLLUP_MISMATCH` is raised
+against those settlements and nothing posts for them.
 
 ---
 
 ## The LLM: one job, fenced, and measured against itself
 
-The regex scores **100% on dev and 0 of 22 on held-out settlement narrations**. That gap — not the
+The regex scores **100% on dev (23/23) and 2 of 23 on held out** — and both of those hits are
+injected stray credits, so on held-out *settlement* narrations it is **0 of 21**. That gap — not the
 arithmetic — is the only place an LLM earns a role here. So it gets exactly one job: extract a UTR
 from a narration no parser was written for. It never chooses between settlements, never explains a
 residual, never touches an amount.
@@ -235,30 +306,37 @@ residual, never touches an amount.
 Every proposal is re-verified by **exact lookup**. A UTR either resolves to a known settlement or it
 does not; there is no "close enough" and no scoring step a confident wrong answer can win.
 
-### What it adds over the deterministic tiers: nothing
+### What it adds over the deterministic tiers: nothing for explanation, two links
 
-Measured live, post-audit. Tier 2 places 20 of the 22 credits first, so the adjudicator is asked
-**2 questions instead of 22** — and the explanation rate does not move.
+Deterministic corroboration places most held-out credits first, so the adjudicator is asked **3
+questions instead of 23** — and the explanation rate does not move. Measured against an **oracle**, a
+perfect extractor built from ground truth, so this is the ceiling for *any* model rather than one
+model's score:
 
-| | rules only | + adjudicator |
+| eval, held out | rules only | + perfect extractor |
 |---|---|---|
-| Explanation rate | 83.33% (20/24) | **83.33% (20/24)** |
-| Linkage precision | 100.00% | 100.00% |
-| Adjudicator calls | 0 | **2** |
-| `blocked_hallucination` | 0 | 0 |
-| Journal entries | 20 | 20 |
+| Explanation rate | 78.26% (18/23) | **78.26% (18/23)** |
+| Linkage precision, bank grain | 100.00% (18/18) | **100.00% (20/20)** |
+| Linkage recall | 99.94% | **100.00%** |
+| Journal entries | 18 | 18 |
+
+**Zero for the headline, two links at the linkage grain** — the two settlements with a stale reported
+total, which no amount-based rule can reach because the amount is the thing that is wrong. They do not
+convert into explained settlements, because the report still contradicts itself and nothing posts.
 
 **This is a better result than the one it replaces, not a worse one.** We went looking for the LLM's
 job, found a deterministic rule that does it better on our own data, published the comparison, and cut
-the model back to the residue nothing else could place — where it also added nothing.
+the model back to the residue nothing else could place — then closed three realism gaps in the
+generator to check whether that residue was an artifact of our own simulator. It was not.
 
-Before Tier 2 existed, three live runs on all 22 narrations returned 5, then 3, then 4 correct — and
-we reported the range rather than the best sample. That run is preserved in
-[RUN_LOG.md](RUN_LOG.md); its denominator was inflated by the same defect Tier 2 fixed, so the figure
-to quote today is the one above: **zero contribution over the deterministic tiers on this data.**
+Before Tier 2 existed, three live runs against all 22 narrations returned 5, then 3, then 4 correct —
+and we reported the range rather than the best sample. That run is preserved in
+[RUN_LOG.md](RUN_LOG.md); its denominator was inflated by the defect Tier 2 fixed, so it is history
+rather than the headline. The real model's extraction accuracy stays **unclaimed**: there is no API
+key in this environment, and the oracle is labelled as an upper bound everywhere it appears (D-022).
 
 Through all of it, at the grain an adjudicator can actually reach, **linkage precision stayed
-100.00%** — including under a hostile adjudicator returning 22 plausible wrong UTRs, all blocked.
+100.00%** — including under a hostile adjudicator returning plausible wrong UTRs, all blocked.
 
 ### Two rejection counters, because they are two different events
 
@@ -302,12 +380,20 @@ resolvable** by any tier, LLM included, because the payment is not in the data. 
 pins the unresolvable list at exactly one class — a growing collection of "we can never fix this" is
 how a blind spot becomes an excuse.
 
-**Truncated narrations** are the same shape arriving from the other direction: 14 of 22 held-out
-credits have the UTR physically cut out of the statement. No tier recovers those, and the system says
-so instead of guessing.
+**Truncated narrations** are the same shape arriving from the other direction: most held-out credits
+have the UTR physically cut out of the statement at 40 characters. No tier recovers those, and the
+system says so instead of guessing.
 
-**Also deliberately absent:** Tier 2 · multi-gateway · a second merchant scenario · FX · TDS 194-O
-(out by merchant persona). Each is a dated decision in [PLAN.md](PLAN.md) with what it ruled out.
+**A settlement whose own reported total is stale.** The arithmetic closes and the linkage holds, but
+the report contradicts itself, so `ROLLUP_MISMATCH` is raised and **nothing posts**. Two per seed.
+Detected reliably; not resolvable from this extract, because the reconciler cannot tell a stale total
+from a line item that should not be there. It is also the one case where an extractor beats every
+deterministic tier — see the ceiling section above.
+
+**Also deliberately absent:** subset-sum candidate search · multi-gateway · a second merchant scenario
+· FX · TDS 194-O (out by merchant persona) · a realistic UTR format, which is the last known realism
+gap and is declined on time rather than merit. Each is a dated decision in [PLAN.md](PLAN.md) with
+what it ruled out, and `ARCHITECTURE.md` §4 lists what the simulator still makes easier than reality.
 
 ---
 
@@ -373,5 +459,5 @@ src/recon/
 
 [PLAN.md](PLAN.md) — every decision and what it ruled out ·
 [RUN_LOG.md](RUN_LOG.md) — measured results per gate ·
-[FAILURE_LOG.md](FAILURE_LOG.md) — eleven real incidents, dated as they happened ·
+[FAILURE_LOG.md](FAILURE_LOG.md) — seventeen real incidents, dated as they happened ·
 [STUDY_PLAN.md](STUDY_PLAN.md)

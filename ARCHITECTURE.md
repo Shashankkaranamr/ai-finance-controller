@@ -14,7 +14,7 @@ pip install -e ".[dev]"          # pydantic + pytest, nothing else
 python -m recon demo             # dev seed, ~50 s from a cold clone
 python -m recon eval             # the held-out seed
 python -m recon ablation --seed eval
-pytest                           # 184 tests
+pytest                           # 207 tests
 ```
 
 No network, no API key, no `make`, no `uv`. The LLM is opt-in (`--llm`).
@@ -90,17 +90,17 @@ produced by re-running can drift from the run it describes; this one cannot.
 |---|---|---|
 | **0** | Exact-key joins; §3.2 identities over values the report *states*; flags, dates, cardinality | Reads reported `fee`/`tax`. Cannot say you were overcharged. |
 | **1** | Types the whole §3.3 deduction stack against a contracted rate card; detects off-contract fees | First tier with a *second, independent opinion* (`domain/rates.py`). |
-| **2** | Corroborates an unmatched credit on exact `(amount, value_date)`; refuses every tie | Deterministic, not fuzzy. Subset-sum stays cut (D-016, D-027). |
+| **2** | Corroborates an unmatched credit on an exact amount inside the bank's posting window; refuses every tie | Deterministic, not fuzzy. No tolerance on money. Subset-sum stays cut (D-016, D-027, D-033). |
 | **3** | Extracts a UTR from a narration no parser was written for | Proposes linkage only. Never touches money. |
 
 ### The ablation
 
 | Cumulative | dev | eval (held out) |
 |---|---|---|
-| T0 · narration join | **0.00%** (0/24) | 0.00% (0/24) |
-| + T1 · arithmetic | **83.33%** (20/24) | 0.00% (0/24) |
-| + T2 · (amount, date) corroboration | 83.33% | **83.33%** (20/24) |
-| + T3 · LLM | 83.33% | **83.33% — adds nothing** |
+| T0 · narration join | **0.00%** (0/23) | 0.00% (0/23) |
+| + T1 · arithmetic | **73.91%** (17/23) | 0.00% (0/23) |
+| + T2 · exact amount in the posting window | 73.91% | **78.26%** (18/23) |
+| + T3 · LLM | 73.91% | **78.26% — adds nothing** |
 
 **Tier 0 alone explains nothing on realistic data.** It finds the counterparty and proves the report
 is internally consistent — genuinely useful — but on a merchant with a rolling reserve it explains not
@@ -122,7 +122,7 @@ still carries a break.
 
 Every exception class declares `detectable_at`, the lowest tier that can flag it; `BUILT_TIER`
 declares how far this build actually goes. False clear splits into **in-remit** (a break the built
-resolver was accountable for and silently passed — **must be zero**, and is: 0/192 dev, 0/184 eval)
+resolver was accountable for and silently passed — **must be zero**, and is: 0/195 dev, 0/187 eval)
 and **out-of-remit** (needs a tier that does not exist; nothing was cleared, nothing looked).
 
 Without a guard this split would be a way to relabel real misses, so:
@@ -179,20 +179,29 @@ matters at the gate.**
 
 ### Finding 3 — the LLM adds nothing over the deterministic tiers, and we published that
 
-Measured live, post-audit, with Tier 2 in place:
+Measured against an **oracle** — a perfect extractor built from ground truth, and therefore the
+ceiling for *any* model rather than one model's score. It needs no API key, which matters because
+there is none in this environment (D-022):
 
-| | rules only | + adjudicator |
+| eval, held out | rules only | + perfect extractor |
 |---|---|---|
-| Explanation rate (eval) | 83.33% (20/24) | **83.33% (20/24)** |
-| Adjudicator calls | 0 | **2** |
-| `blocked_hallucination` | 0 | 0 |
-| Linkage precision, bank grain | 20/20 | 20/20 |
+| Explanation rate | 78.26% (18/23) | **78.26% (18/23)** |
+| Linkage precision, bank grain | 100.00% (18/18) | **100.00% (20/20)** |
+| Linkage recall | 99.94% | **100.00%** |
+| Journal entries | 18 | 18 |
 
-Corroboration places 20 of 22 credits first, so the model is asked **2 questions instead of 22**, and
-moves the result by **zero**.
+**Zero for the headline. Two links at the linkage grain** — the settlements whose reported total is
+stale, which no amount-based rule can reach because the amount is the thing that is wrong. The UTR is
+the only reference independent of every amount being right, and that is the real-world argument for
+it. Those links convert to **zero** additional explained settlements: the report still contradicts
+itself and nothing posts. Both halves are published, because the first without the second overstates
+what extraction buys.
 
 **That is the stronger claim, not the weaker one.** We looked for the LLM's job, found a deterministic
-rule that does it better on our own data, published the comparison, and cut the model to the residue.
+rule that does it better on our own data, published the comparison, cut the model to the residue —
+and then went back and closed three acknowledged realism gaps in the generator to check whether that
+residue was an artifact of our own simulator (§4). It was not: the ceiling never rose above one
+credit, and after the gaps closed it was zero on both seeds.
 
 *Before* Tier 2 existed, three runs over all 22 narrations returned 5, 3 and 4 correct, and we
 published the range rather than the best sample — *quoting 62% alone would be quoting the better
@@ -200,8 +209,8 @@ sample*. That discipline stands and the run is preserved in RUN_LOG.md. Its deno
 inflated by the defect Tier 2 fixed, so it is history rather than the headline.
 
 **What did not move, through any of it:** linkage precision at the bank grain, 100.00%, including
-under a hostile adjudicator returning 22 plausible wrong UTRs — all blocked. The LLM is *allowed* to
-be unreliable. That is the design.
+under a hostile adjudicator returning plausible wrong UTRs — all blocked. The LLM is *allowed* to be
+unreliable. That is the design.
 
 ### Where determinism stops
 

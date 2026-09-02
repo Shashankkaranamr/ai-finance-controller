@@ -1,30 +1,29 @@
 # Video script — 5:00 hard cap
 
-> # ⚠ STALE — DO NOT FILM FROM THIS YET
+> # Current as of 02 Sep 2026 — filmable
 >
-> An adversarial audit on **01 Sep** found three load-bearing false claims in the shipped docs. Six
-> fixes landed the same day and **moved numbers this script quotes**. The beats below are flagged
-> inline with **[STALE]**; the underlying structure and timings are unaffected.
+> Rewritten against the numbers a run produces **today**. The 01 Sep audit's six fixes and the 02 Sep
+> realism increment are both folded in; no beat below quotes a superseded figure.
 >
-> **Left for you to rewrite — deliberately not auto-edited**, because these are the beats whose
-> *argument* changed, not just their digits:
+> **What changed since the last draft, and why the script is stronger for it:**
 >
 > | Block | What changed |
 > |---|---|
-> | 1:15–2:45 | The drill-down exception. The old top-of-queue entry was a **false alarm** — a settlement reported missing whose credit was in the bank file. Figures are also stale (it says "Rs 1,63,318, processed 13 June"; the current top entry differs). |
-> | 2:45–3:30 | The ablation, and the pull-quote. eval is no longer 0% and the LLM no longer adds 3–5 of 22 — **it adds zero** over deterministic corroboration. The "quoting 62% would be quoting the better sample" discipline still stands, but it now describes a superseded run. |
-> | 4:20–5:00 | The "UTR physically cut out" beat. That claim was **false as shipped** — every bank row carried the full UTR in its own primary key. It is true now (`bank_ref` is a CRC), but "no tier recovers those" is still wrong: `(amount, value_date)` recovers 20 of 22. |
+> | 1:15–2:45 | The drill-down is now `SETTLEMENT_FAILED` — the case where the system tells "the money never left" apart from "the bank lost it". The old entry was a false alarm. |
+> | 2:45–3:30 | The ablation beat now carries the **artifact-versus-fact** finding: we tested our own headline against our own simulator, watched corroboration collapse 18 → 4, rebuilt the rule, and got 18 back. That is the strongest 45 seconds in the film. |
+> | 4:20–5:00 | The truncated-UTR beat is true now (`bank_ref` is a CRC), and the stale-total settlement is added — the one case where extraction beats every deterministic tier. |
 >
-> Current numbers: [RUN_LOG.md](RUN_LOG.md) → *Adversarial audit — six fixes*. The story is
-> **stronger**, not weaker: we found a deterministic rule that beat the LLM on our own data,
-> published the comparison, and cut the model to the residue.
+> Blocks 0:00–0:35, 0:35–1:15 and 3:30–4:20 (the network kill) are unchanged.
 >
-> Blocks 0:00–0:35, 0:35–1:15 and 3:30–4:20 (the network kill) are **unaffected** and can be filmed
-> as written.
+> **Numbers to re-check on the machine you film on**, because they are quoted aloud: explanation rate
+> and settlement coverage on eval (78.26% / 81.82%), the top queue entry's amount, and the test count.
 
 Follows BRIEF §11's block structure. Narration is written to be **spoken** at ~140 wpm.
 
-**Budget: 620 spoken words ≈ 4:25, leaving ~35 s for the live run, the network kill and pauses.**
+**Budget: 685 spoken words ≈ 4:53, leaving ~7 s. Counts below are generated from the text by
+`scripts` word count, not estimated, and they are deliberately higher than the pre-02-Sep draft's:
+the ablation block grew because the artifact-versus-fact finding is now the centrepiece of the film.
+Time a full read-through before filming. If a take runs long, cut from 1:15–2:45 — never 3:30–4:20.**
 
 Budget arithmetic: 4:25 spoken, plus ~15 s of silence for the network kill and ~10 s watching the
 run land — about 4:50 against a 5:00 cap.
@@ -75,64 +74,58 @@ next block's visual.
 
 ---
 
-## 1:15–2:45 · Live run on the held-out batch, and one exception · *136 words* · **[STALE]**
+## 1:15–2:45 · Live run on the held-out batch, and one exception · *125 words*
 
-> **[STALE]** The exception drilled into below was a false alarm, and the figures have moved. The
-> beat still works — pick the current top-of-queue entry from `out/eval/exceptions.jsonl` — but the
-> narration needs rewriting against a real one.
-
-**Run `python -m recon eval` on camera. Let it breathe — the run is ~1 s, the reading is the content.**
+**Run `python -m recon eval` on camera. Let it breathe — the run is under half a second, the reading is the content.**
 
 > Held-out seed — a different world *and* narrations the parser has never seen. Three and a half
-> thousand records, a quarter of a second, statement foots to zero.
+> thousand records, under half a second, statement foots to zero.
+>
+> **Seventy-eight percent explanation, eighty-two percent coverage.** Never one without the other.
 >
 > The queue sorts by **cash at risk**. Finance triages by money, not row count.
 
-**Drill into the top entry.**
+**Drill into the top entry — `SETTLEMENT_FAILED`, Rs 1,41,743.98.**
 
-> **Rs 1,63,318**. Processed 13 June, **no bank credit carrying that UTR**.
+> **Rs 1,41,744**, no bank credit. But look at *why*.
 >
-> The evidence isn't a score — two checkable facts: the settlement's status and UTR, and *"no narration
-> among 24 bank credits yielded this UTR."* The action is careful on purpose: **confirm it isn't still
-> in transit** before calling it missing.
+> Status: **failed**. The transfer was attempted and didn't complete — the money never left, and the
+> bank hasn't lost it. Action to **treasury**: confirm the beneficiary details.
 >
-> And notice what it attaches to. There's no edge — the credit doesn't exist. An unmatched unit is the
-> **absence** of an edge, and absence carries no evidence.
+> A missing credit and a failed one look **identical** in a statement. Neither has a row. They send an
+> analyst to opposite ends of the building.
 
 **Scroll to an `MDR_SLAB_MISMATCH`.**
 
-> One only Tier 1 can see: charged **Rs 165.84** where the contract gives **Rs 110.55**.
+> And one only Tier 1 can see: charged off-contract. Recoverable money.
 
 ---
 
-## 2:45–3:30 · The ablation · *127 words* · **[STALE — argument changed]**
-
-> **[STALE]** eval is no longer 0%, and the LLM's contribution is no longer 3–5 of 22 — it is
-> **zero** over deterministic corroboration, which now carries the held-out seed at 83.33%. The
-> range discipline stands but describes a superseded run. This is the beat that most needs your
-> hand: the new story is *stronger*.
+## 2:45–3:30 · The ablation, and the question we asked about it · *171 words* · **the centrepiece**
 
 > **Tier 0 alone explains zero percent of bank credits on realistic data.** That's the finding, not a
 > regression — it knows nothing about a rolling reserve.
 >
-> Add Tier 1: **83% explanation rate, 91% settlement coverage.**
->
-> On the held-out seed the regex extracts **nothing** — so we measured the arithmetic without linkage:
-> **100% on both seeds.** The held-out failure is *entirely* narration parsing.
+> Add Tier 1 arithmetic: **seventy-four percent.** Add deterministic corroboration: **seventy-eight
+> on the held-out seed.** Add the LLM: **no change.**
 
 **Slow down. This is the beat.**
 
-> We ran the held-out evaluation. Got **five of twenty-two**. Re-ran it to make the artifacts match —
-> got **three**. Third run: **four**.
+> So we asked the obvious question about our own result. Is "the LLM adds nothing" a fact about
+> reconciliation — or an artifact of data we wrote ourselves?
 >
-> **We're reporting the range. Three to five. Thirty-eight to sixty-two percent on recoverable data.**
+> We closed three realism gaps our own architecture doc had already admitted to. One mattered: the
+> bank statement was restating the gateway's own date. Fix that, and our matching rule **collapsed
+> from eighteen to four.**
 >
-> **Quoting sixty-two alone would be quoting the better sample.**
+> Rebuilt properly — exact amount, inside the bank's posting window — it came **back to eighteen, at
+> a hundred percent precision.** Because what identifies a settlement is the **amount**. All
+> twenty-two are unique, the closest pair a hundred and seventy-one rupees apart. True of real
+> settlements, not just ours.
 >
-> And underneath a model swinging twenty-four points, **precision was one hundred percent in all three
-> runs.** The fence never moved.
+> **Half our finding was an artifact. The bigger half was real. We published both.**
 
-**On screen:** the three-run table, precision row highlighted. Hold through the pull-quote.
+**On screen:** the 18 → 4 → 18 table, then the oracle ceiling row.
 
 ---
 
@@ -164,26 +157,24 @@ Around call 8–10 (~20 s in), **disable the network adapter on camera.** Don't 
 
 ---
 
-## 4:20–5:00 · The honest exception list · *115 words* · **[STALE in part]**
-
-> **[STALE]** The `REFUND_ORPHANED` blind spot is unchanged and still true. The "fourteen of
-> twenty-two have the UTR physically cut out" beat is not: it was false as shipped, is true now
-> after the `bank_ref` fix, but "no tier recovers those" remains wrong — corroboration recovers 20
-> of 22 without reading the narration at all.
+## 4:20–5:00 · The honest exception list · *140 words*
 
 > The queue separates **breaks** from **explained-but-notable**. A withheld reserve isn't a break —
 > it's a receivable. Conflating them inflates your exception count.
 >
-> The class we **cannot** solve: a refund whose original payment predates this extract. Detected every
-> time. **Never** resolvable — the payment isn't in the data.
+> The class we **cannot** solve: a refund whose payment predates this extract. Detected every time.
+> **Never** resolvable — the payment isn't in the data.
 >
-> The live run showed the same shape from the other side. Fourteen of those twenty-two narrations have
-> the UTR **physically cut out** at forty characters. The model returned what was there — it was
-> **right**. We'd counted those as hallucinations, overstating model error fivefold.
+> Most held-out narrations have the UTR **cut out** at forty characters. The model returned what was
+> there — it was **right**. We'd called those hallucinations, overstating model error fivefold.
 >
 > **"The model was wrong" and "the answer wasn't recoverable" are different findings.**
 >
-> One deep loop, measured honestly — including the parts that didn't work.
+> And the one place extraction beats every deterministic tier: a settlement whose **own reported total
+> is stale**. No amount rule reaches it. It buys the link — and still nothing posts, because the
+> report contradicts itself.
+>
+> One deep loop, measured honestly — including the part where we proved our own headline half wrong.
 
 **On screen:** the queue with `is_break` visible, then the repo URL.
 
@@ -191,11 +182,11 @@ Around call 8–10 (~20 s in), **disable the network adapter on camera.** Don't 
 
 ## Pre-flight checklist
 
-- [ ] `pytest` green (**184**) on the machine being filmed
-- [ ] **Every [STALE] beat rewritten against current numbers** — see the banner
+- [ ] `pytest` green (**207**) on the machine being filmed
+- [ ] Re-run `demo` and `eval` and confirm every spoken number against the banner
 - [ ] `demo` and `eval` both clean from a fresh clone
 - [ ] **Rehearse the network kill** — confirm ~20 s lands mid-batch
 - [ ] Terminal font large enough to read queue entries
 - [ ] Explanation rate and settlement coverage visible **together** in every metrics frame
-- [ ] Three-run table on screen for the whole pull-quote beat
+- [ ] The 18 → 4 → 18 table on screen for the whole artifact-versus-fact beat
 - [ ] **Time a full read-through before filming.** Three drafts running, the estimate was optimistic.
