@@ -14,7 +14,7 @@ pip install -e ".[dev]"          # pydantic + pytest, nothing else
 python -m recon demo             # dev seed, ~50 s from a cold clone
 python -m recon eval             # the held-out seed
 python -m recon ablation --seed eval
-pytest                           # 207 tests
+pytest                           # 258 tests
 ```
 
 No network, no API key, no `make`, no `uv`. The LLM is opt-in (`--llm`).
@@ -138,15 +138,33 @@ Without a guard this split would be a way to relabel real misses, so:
 
 ## 3. The fence — what the LLM may and may not do
 
-**May:** propose a UTR extracted from one bank narration.
-**May not:** choose between candidate settlements, explain a residual, touch an amount, or see
-anything except the free text. It is not given the credit amount, the date, or a list of valid UTRs —
-handing it valid UTRs would let it "extract" one it never read, and the verifier could not tell the
+There are **two** jobs, and one admission test decides whether a third ever gets built:
+
+> **What independently verifies the proposal?** Where nothing does, the job stays cut.
+
+That test is why there is no candidate ranking (Tier 2's exact-amount uniqueness already decides),
+no residual classification (nothing checks it at runtime), and no subset-sum search.
+
+**Job 1 — parse a narration.**
+*May:* propose a UTR extracted from one bank narration.
+*May not:* choose between candidate settlements, explain a residual, touch an amount, or see anything
+except the free text. It is not given the credit amount, the date, or a list of valid UTRs — handing
+it valid UTRs would let it "extract" one it never read, and the verifier could not tell the
 difference.
 
 Every proposal is re-verified by **exact lookup**. A UTR either resolves to a known settlement or it
 does not: no tolerance, no scoring, nothing for a confident wrong answer to win. An accepted edge is
 `MATCHED`, not `EXPLAINED` — Tier 1 still has to explain the money before anything posts.
+
+**Job 2 — map a schema that drifted** (`resolve/schema_repair.py`, D-036).
+*May:* propose a mapping from the columns a file actually has to the fields the schema declares.
+*May not:* see the identities, the rate card, or ground truth. It gets the observed column names, the
+target field names, and **one** sample row — a model told what would make an answer verify can write
+to the test.
+
+This job runs **before Tier 0**, and the order is load-bearing: Tier 0's completeness gate reads the
+quarantine, so a view recovered here is one Tier 0 reasons from normally, and a view left unrecovered
+still correctly suppresses every absence-based claim.
 
 ### Finding 1 — the fence holds under attack
 
@@ -177,7 +195,12 @@ matters at the gate.**
 
 `test_a_correctly_read_but_ambiguous_utr_is_still_refused`
 
-### Finding 3 — the LLM adds nothing over the deterministic tiers, and we published that
+### Finding 3 — the LLM adds nothing over the deterministic tiers *for linkage*, and we published that
+
+Scope first, because Finding 4 cuts the other way: this is a claim about **linkage and explanation on
+inputs that parse**. Where the deterministic tiers already have an answer, the model does not improve
+it. Where they have none — a drifted schema — the same fenced approach takes in-remit false clear from
+190/195 to 0/195. Both findings are real; they are about different places in the system.
 
 Measured against an **oracle** — a perfect extractor built from ground truth, and therefore the
 ceiling for *any* model rather than one model's score. It needs no API key, which matters because
@@ -211,6 +234,43 @@ inflated by the defect Tier 2 fixed, so it is history rather than the headline.
 **What did not move, through any of it:** linkage precision at the bank grain, 100.00%, including
 under a hostile adjudicator returning plausible wrong UTRs — all blocked. The LLM is *allowed* to be
 unreliable. That is the design.
+
+### Finding 4 — the second job's verifier is stronger than the first's, and the obvious version of it was wrong
+
+Job 1's gate is an exact lookup: a UTR resolves or it does not. Job 2's proposal is a *mapping*, and
+it must survive four gates — structural (no invented field names, injective, required fields covered),
+total re-validation (**every** quarantined row through the same Pydantic model, not most), containment,
+and utility (the repaired view must still serve its join).
+
+**Containment is the interesting one.** The obvious check is the GST identity — tax is 18% of the MDR
+base. Measuring rejected it immediately: it fails on **17 of 890** fee-bearing dev rows and **13 of
+885** on eval, because `GST_ON_MDR_MISMATCH` is an anomaly the generator injects deliberately. Gating
+on it rejects a **correct** mapping because the data contains the defect the system exists to find —
+failing on exactly the merchants who need repair most.
+
+So the gate asks a different question. Not *"was the right rate charged"*, which is Tier 1's job and
+may legitimately be no, but *"is this column still the thing it claims to be"*:
+
+```
+fee <= amount        a fee is charged ON the amount
+tax <= fee           `fee` is INCLUSIVE of tax (ingest/schemas.py says so)
+amount > 0           every line moves something
+not (credit > 0 and debit > 0)     a line moves money one way
+```
+
+Each holds on **100% of rows on both seeds**; a single fee/tax swap breaks containment on **all 890
+and all 885** fee-bearing rows at once. Exact, total, and blind to whether the money itself was right.
+That is what catches the failure Pydantic cannot see: two fields of the *same type* swapped, which
+re-validates perfectly and is arithmetic nonsense.
+
+`tests/test_schema_repair_fence.py` asserts both directions, as the Tier 3 fence tests do: a hostile
+mapping is blocked with the rows left quarantined, and a truthful one is **accepted** — a gate that
+rejects everything is a wall, not a fence.
+
+**Measured on a drifted view**, rules-only in-remit false clear is **190/195 on dev and 180/187 on
+eval**; a verified repair returns the run to **17/23 and 0/195**, **18/23 and 0/187** — byte-for-byte
+its clean figures. That number also reframes invariant 10: in-remit false clear is zero **conditional
+on the inputs loading**, and nothing before this made the condition visible.
 
 ### Where determinism stops
 
@@ -305,12 +365,13 @@ Not oversights. Each is a dated decision recording what it ruled out.
 | Absent | Why | Decision |
 |---|---|---|
 | **Subset-sum search** | Increment 1 measured the residual as 100% typed with **zero scatter** — nothing for a search to search. Building difficulty *to justify* the LLM is the §9 anti-pattern. Tier 2 now exists, but as exact corroboration, not search. | D-016, D-027 |
-| **Multi-gateway collision** | Held as the ambiguity "lever" from 25 Aug, then cut outright rather than manufacture difficulty. | D-016 |
+| **Multi-gateway collision** | Held as the ambiguity "lever" from 25 Aug, then cut rather than manufacture difficulty. Run once on 02 Sep as a **pre-registered experiment**, not a feature: the prediction (the LLM's ceiling would not rise) was registered first and **held — 0 → 0**. Tier 2 keys on exact `int(amount)`, so proximity is irrelevant. Code stashed, knob ships nowhere. | D-016 |
 | **Second merchant scenario** | Doubles generator surface, produces no new *break shape*; a card-heavy merchant's difficulty fits inside one merchant's method mix. | D-011 |
 | **FX / international** | A second currency threaded through the money type, to buy one exception code. | D-011 |
 | **TDS 194-O** | Out by merchant persona — monthly-grain, seller-level, reconciled to Form 26AS. A second sub-recon at a different grain. | Assumption 1 |
 | **Third rate-card seed** | Would upgrade "generalises across worlds" to "across contracts". 1–2 h, fixes nothing broken. | D-024 |
 | **Cross-run LLM cache** | Would make `--llm` runs reproducible. The demo and every gate run the deterministic core. | D-026 |
+| **`draft_note` and rate-card extraction** | Both pass the admission test — a note's every numeral must trace to engine-computed evidence; an extracted rate card must reproduce observed fees on settlements where no mismatch is alleged. Designed, verifiers identified, not built. | D-036 |
 
 The taxonomy is disciplined the same way: `CHARGEBACK_FEE_UNBOOKED` and `PARTIAL_SETTLEMENT` were
 **removed** from `ExceptionType` because the generator cannot honestly produce them (D-013). A
@@ -415,9 +476,24 @@ once.
 Increment 0 precisely so a read-only live adapter is an implementation rather than a refactor. The
 seam exists and is unused.
 
-**5. Tier 2, if and only if data demands it.** Not "next" so much as *conditional*: it needs a
-residual distribution with genuine scatter, which our generator does not produce and which we declined
-to manufacture. On real merchant data, this is the first thing to re-measure.
+**5. `draft_note` — the third fenced job, ~2 h.** `PLAYBOOK` (`report/exceptions.py`) is 20 static
+per-type action strings, while `hypothesis` is already per-instance and specific. `MDR_SLAB_MISMATCH`
+— the one exception type that *recovers cash* — knows the method, contracted bps, charged bps,
+per-line overcharge and affected `entity_id`s, and emits "quote the rate card version to the gateway."
+It has everything needed to write the claim. Verifier: **every numeral in the draft must appear in the
+evidence set the engine computed**, which enforces invariant 8 by construction — the model renders
+numbers, never produces them. (D-036.)
+
+**6. Rate-card extraction from a contract, ~4 h.** `MDR_SLABS` is a module-level literal, so onboarding
+a merchant means editing Python and every overcharge claim is only as good as an engineer's
+transcription of a negotiated PDF. Verifier: back-test the extracted card against settlements where no
+mismatch is alleged — it must reproduce observed fees. Blocked on the same "rates must become
+injectable" work as item 1. (D-036.)
+
+**7. Subset-sum candidate search — conditional, not scheduled.** It needs a residual distribution with
+genuine scatter, which our generator does not produce and which we declined to manufacture. On real
+merchant data, this is the first thing to re-measure. (Tier 2 exists today, but as *exact*
+corroboration — D-027, D-033 — not search.)
 
 **What we would not do:** add features to broaden the surface. The submission's argument is one deep
 loop measured honestly, and four shallow features is the §9 anti-pattern that would weaken it.

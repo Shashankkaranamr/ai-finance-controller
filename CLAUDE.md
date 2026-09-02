@@ -42,49 +42,66 @@ estimates. If you feel the urge to plan the whole build, re-read §13.1.
 
 ## Current state
 
-**Increment 0 — CLOSED 25 Aug 2026.** · **Increment 1 — CLOSED 31 Aug 2026.**
-**Increment 2 (Tier 1) — CLOSED 01 Sep 2026.** · **Increment 3 (fenced adjudicator) — CLOSED 01 Sep 2026.**
-**156 tests green.** Next: **Increment 6 — artifacts. Protected, 2 days.**
+**Increments 0–3 — CLOSED 25 Aug – 01 Sep 2026.** · **Audit response — 01 Sep.** ·
+**Realism + review response — 02 Sep.** · **Schema repair — 02 Sep.**
+**258 tests green.** Next: **Increment 6 — artifacts. Protected.**
 
-Increments 2 and 3 were built **autonomously overnight**. D-018 through D-023 were taken without
-review and are marked in the Decisions Log as open for override. **Read RUN_LOG.md's Increment 3
-entry first — it opens with an overnight summary.**
+Increments 2 and 3 were built **autonomously overnight**; D-018 through D-023 were taken without
+review and remain marked open for override in the Decisions Log.
 
 ### The headline numbers
 
 | | dev | eval (held out) |
 |---|---|---|
-| Explanation rate · coverage | 83.33% (20/24) · 90.91% (20/22) | 0.00% — no linkage; see below |
-| Decomposition closure (no linkage, no truth) | 100.00% (22/22) | 100.00% (22/22) |
-| False-clear, in remit | 0.00% (0/192) | 0.00% (0/184) |
-| Narration parse rate | 100.00% | 8.33% (truly 0 of 22 settlement narrations) |
-| Ablation | T0 0.00% -> T1 83.33% | T0/T1 0.00%, T3-with-oracle 87.50% |
+| Explanation rate · coverage | 73.91% (17/23) · 77.27% (17/22) | 78.26% (18/23) · 81.82% (18/22) |
+| Linkage precision | 100.00% (3,387/3,387) | 100.00% (3,506/3,506) |
+| False-clear, in remit | 0.00% (0/195) | 0.00% (0/187) |
+| Decomposition closure (no linkage, no truth) | 90.91% (20/22) | 90.91% (20/22) |
+| Narration parse rate (regex) | 100.00% (23/23) | 8.70% (2/23) |
+| Ablation | T0 0.00% -> T1 73.91% | T0/T1 0.00% -> T2 78.26%; T3 adds nothing |
 
-**Hostile adjudicator: 22 proposals, 22 blocked, 0 edges, precision 100.00%.**
+**These went DOWN on 02 Sep and that is the system working** — closing three generator realism gaps
+revealed two settlements per seed posting against a self-contradicting report (F-016, F-017).
+
+**Hostile adjudicator: every proposal blocked, 0 edges, linkage precision unmoved at 100.00%.**
+**Hostile schema mapper: blocked at the containment gate, rows stay quarantined.**
 
 ### What exists
 
-Tier 0 (exact-key joins, cardinality, flags, GST identity) · **Tier 1** (full deduction stack typed
-against `domain/rates.py`, off-contract fee detection) · **Tier 3** (LLM fenced to narration parsing,
-verifier gate, `blocked_hallucination`, cache) · faithful generator, dev + held-out eval · statement
-foots, journal entries post and balance · typed prioritised queue · audit log · determinism on both
-seeds · degraded mode on every run.
+Tier 0 (exact-key joins, cardinality, flags, GST identity, **source-completeness gating**) ·
+**Tier 1** (full deduction stack typed against `domain/rates.py`, off-contract fee detection) ·
+**Tier 2** (exact-amount corroboration inside the posting window, every tie refused — D-027, D-033) ·
+**Tier 3** (LLM fenced to narration parsing, verifier gate, two rejection counters, cache) ·
+**schema repair** (LLM proposes a column mapping, four exact gates, `blocked_bad_mapping` — D-036) ·
+faithful generator, dev + held-out eval · statement foots, journal entries post and balance · typed
+prioritised queue · audit log · determinism on both seeds · degraded mode on every run ·
+`README.md`, `ARCHITECTURE.md`, `VIDEO_SCRIPT.md`, architecture diagram.
 
 ### What does NOT exist
 
-Tier 2 (**CUT**, D-016) · multi-gateway (**CUT**) · second merchant (**CUT**) · FX (**CUT**) ·
-TDS 194-O (out by persona) · any UI · `ARCHITECTURE.md` (Increment 6).
+Subset-sum search (**CUT**, D-016/D-027) · multi-gateway (**CUT** D-016; experiment run and closed
+02 Sep, below) · second merchant (**CUT**) · FX (**CUT**) · TDS 194-O (out by persona) · any UI ·
+`draft_note` and rate-card extraction (designed, verifiers identified, deferred — D-036).
 
-**No API key in this environment**, so the LLM's real extraction accuracy is **unmeasured and
-claimed nowhere** (D-022). The oracle figure is an upper bound, labelled as such everywhere it
-appears. With a key, one `recon eval` run with the adjudicator wired in produces the real number.
+**No API key in this environment**, so the LLM's real accuracy — extraction *and* mapping — is
+**unmeasured and claimed nowhere** (D-022, D-036). Every published LLM number comes from test doubles
+(oracle, hostile, structurally invalid) and measures **the fence**, never the model.
+
+### The second-gateway experiment — closed 02 Sep, code stashed
+
+Pre-registered, run, closed. The falsifiable core held: **the oracle ceiling did not rise, 0 → 0** —
+Tier 2 keys on exact `int(amount)`, so an amount-proximate credit hits no key and proximity is
+irrelevant. One row falsified: `UNMATCHED_BANK_CREDIT` stayed at 2 rather than rising by 6, because
+the `utr is None` branch fires *before* the settlement lookup and held-out narrations never parse. The
+implementation is **stashed, not discarded** (`git stash list`); the knob ships nowhere and no test
+depends on it. Full result in RUN_LOG.
 
 ### NEEDS SIGN-OFF BEFORE IT SHIPS
 
-`README.md` still carries Increment 1's numbers and now **understates the system badly** — it reports
-explanation rate 0.00% where dev is 83.33%, and it predates Tier 1, Tier 3 and the fence entirely.
-Rewriting it changes the project's public framing, so it was deliberately left alone overnight. It is
-the first Increment 6 task.
+`README.md` and `ARCHITECTURE.md` were brought current with Part 0/1/2 on 02 Sep — schema repair,
+F-018, D-036, and the second-gateway result. **Not yet reviewed by the user.** These are the public
+framing and two of the four things Razorpay actually receives, so treat the wording as provisional
+until it is signed off.
 
 ---
 
@@ -95,7 +112,7 @@ the first Increment 6 task.
 ./.venv/Scripts/python.exe -m recon eval     # the HELD-OUT seed: different world AND narrations
 ./.venv/Scripts/python.exe -m recon generate --seed dev --days 88
 ./.venv/Scripts/python.exe -m recon run --seed dev
-./.venv/Scripts/python.exe -m pytest         # 156 tests; use bare pytest, NOT -q (addopts already has it)
+./.venv/Scripts/python.exe -m pytest         # 258 tests; use bare pytest, NOT -q (addopts already has it)
 ```
 
 The venv is at `.venv/`. `make` and `uv` are **not installed** on this machine — `python -m recon`
@@ -146,6 +163,14 @@ load, not code; 57 s was the Inc 0 figure on the old OneDrive path — see D-008
 14. **The verifier gate is necessary, not sufficient.** It blocks a wrong answer; it does not block a
     *correct* answer to an ambiguous question. "The model was correct" and "the action was safe" are
     different questions and only the second one matters at the gate (D-023).
+15. **An absence is only evidence when the view that would have carried the row loaded completely.**
+    Every claim reasoning from a row NOT being there checks `repo.view_is_complete()` first; a view
+    short of rows raises `SOURCE_VIEW_INCOMPLETE` and the absence-based claims it invalidates are
+    withheld, not published beside it. A renamed column once produced 21 `MISSING_BANK_CREDIT` breaks
+    asserting "every credit in the statement was read" (F-018).
+16. **A count is a diagnostic, not a control.** If a fact would invalidate a published claim, it must
+    gate that claim in code. The quarantine count was printed in the run summary, twenty lines above
+    the false breaks, on every single run (F-018).
 
 ---
 
@@ -236,9 +261,12 @@ src/recon/
   ingest/schemas.py      Pydantic, extra="forbid" so a renamed column fails loudly
   ingest/load.py         Repository + quarantine
   ingest/source.py       SettlementSource protocol (a real API client plugs in here)
-  resolve/tier0.py       exact-key join + identity checking
+  resolve/tier0.py       exact-key join + identity checking + source-completeness gating
+  resolve/tier2.py       exact-amount corroboration inside the posting window (D-027)
+  resolve/tier3.py       the fenced adjudicator: parse_narration + the verifier gate
+  resolve/schema_repair.py  map_schema: proposes a column mapping, four exact gates (D-036)
   resolve/pipeline.py    the run: load -> resolve -> measure -> close loop -> artifacts
-  llm/client.py          Adjudicator protocol, cache, NullAdjudicator
+  llm/client.py          Adjudicator protocol, cache, NullAdjudicator, LLMStats counters
   ledger/statement.py    footing statement + balanced journal entries
   report/metrics.py      every numerator and denominator, stated
   report/exceptions.py   the queue: type, evidence, hypothesis, action, owner
@@ -263,7 +291,18 @@ rather than dressing up a for-loop.
 
 ---
 
-## Open question for Increment 2
+## Open question for Increment 2 — [CLOSED 01–02 Sep 2026]
+
+Kept for the reasoning, not as live guidance. **Both branches below were eventually answered by
+measurement:** Tier 1 closed the residual, so the first branch is the shipped submission (D-016);
+the multi-gateway lever was later pulled anyway, as a *pre-registered experiment* rather than a
+feature, and the result was that it changes nothing — the oracle ceiling did not move. The
+implementation is stashed and the reasoning is in RUN_LOG's 02 Sep entries.
+
+The thing this section got wrong is worth keeping: it framed the LLM's place as a binary between
+"narration extraction" and "manufactured Tier-2 ambiguity". The third option it never considered —
+**the ingest boundary**, where a renamed column costs a whole view and no rule can recover it — is
+where the second fenced job actually landed (D-036).
 
 **Does Tier 1 close the residual to zero — and if it does, what is the submission?**
 

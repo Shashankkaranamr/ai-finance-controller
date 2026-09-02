@@ -2,7 +2,7 @@
 
 **Razorpay Buildathon, Track 04.** Three-way settlement reconciliation — books ↔ Razorpay settlement
 report ↔ bank statement — with typed variance decomposition, an auto-posting ledger, and an honest
-exception queue. A deterministic pipeline with the LLM fenced into one job it cannot corrupt.
+exception queue. A deterministic pipeline with the LLM fenced into two jobs it cannot corrupt.
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate     # Windows;  source .venv/bin/activate elsewhere
@@ -34,7 +34,7 @@ seen.** Every figure below is reproduced by `python -m recon demo` and `python -
 | **Reconciliation statement** | **foots to zero** | **foots to zero** |
 | Throughput | 3,326 records in ~0.4 s | 3,434 records in ~0.4 s |
 | Determinism | byte-identical `metrics.json` across two runs, a regeneration **and a fresh clone** | same |
-| Tests | **211**, green on a clean clone with `data/` absent | — |
+| Tests | **258**, green on a clean clone with `data/` absent | — |
 
 ### The ablation — what each tier is actually worth
 
@@ -82,9 +82,11 @@ reconciliation or an artifact of data we wrote ourselves, and published which ha
 ---
 
 **Status:** Increments 0–3 complete, plus a realism increment on 02 Sep that closed three
-acknowledged generator gaps and re-measured everything. This is an incremental build:
+acknowledged generator gaps and re-measured everything, and a schema-repair increment the same day
+that fixed a live defect (F-018) and added the LLM's second fenced job (D-036). This is an
+incremental build:
 [PLAN.md](PLAN.md) records every decision and what each one ruled out · [RUN_LOG.md](RUN_LOG.md) has
-the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has seventeen real
+the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has eighteen real
 dated incidents · [ARCHITECTURE.md](ARCHITECTURE.md) is the design walkthrough.
 
 ---
@@ -122,7 +124,7 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 211 tests
+pytest                                              # 258 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
@@ -140,8 +142,12 @@ point of that subcommand, so it always tries, and reports the degraded path when
 ## Architecture: a pipeline with a fenced LLM, and we say so
 
 The track asks for an "agent". What closes this loop reliably is a **deterministic pipeline with the
-LLM fenced into one job it cannot corrupt**. Calling a for-loop an agent is the anti-pattern; the
+LLM fenced into two jobs it cannot corrupt**. Calling a for-loop an agent is the anti-pattern; the
 ablation table is the argument, and it is published below either way.
+
+Both jobs pass the same admission test, and it is the test rather than the jobs that matters:
+**what independently verifies the proposal?** Where nothing does, the job stays cut — which is why
+there is no candidate ranking, no residual classification, and no subset-sum search here.
 
 Reconciliation is modelled as a **graph of typed edges**, not as stages over rows. An edge asserts
 *"these two units are the same money, and here is the typed arithmetic explaining why the amounts
@@ -165,6 +171,7 @@ Four grains, each with its own denominator (`src/recon/domain/graph.py`, `EDGE_S
 | **1** | Types the whole deduction stack against a contracted rate card; detects off-contract fees | built |
 | **2** | Corroborates an unmatched credit on an exact amount inside the bank's posting window | built |
 | **3** | LLM extracts a UTR from a narration no parser was written for | built, fenced |
+| **ingest** | LLM proposes a column mapping when a source view fails schema validation | built, fenced |
 
 **Tier 2 is not subset-sum, and subset-sum stays cut** (D-016, D-027, D-033). Searching manufactured
 ambiguity *in order to* give the LLM something to adjudicate is the §9 "agent as marketing"
@@ -269,6 +276,15 @@ reality. Three of those gaps were closed, one was **withdrawn as factually wrong
 was re-measured. The rule was fixed in advance: only gaps already named could be closed, and no change
 could be justified by what it would do to the LLM's role.
 
+**First, what the claim is scoped to.** "Adds nothing" is a statement about **linkage and
+explanation on inputs that parse** — the headline loop, where deterministic arithmetic and two exact
+columns do the work. It is *not* a statement about the LLM in this system generally, and the second
+fenced job is the counter-example we measured ourselves: on a view whose schema has drifted, in-remit
+false clear is **190/195 rules-only and 0/195 with a verified mapping**
+([above](#job-two-repairing-a-schema-nobody-warned-us-about)). Same fence, same discipline, opposite
+result — because the two jobs sit at different places, and only one of them is somewhere determinism
+already had an answer.
+
 **The answer is both, and the split is measurable.**
 
 ### The artifact half — and it was load-bearing
@@ -345,13 +361,15 @@ against those settlements and nothing posts for them.
 
 ---
 
-## The LLM: one job, fenced, and measured against itself
+## The LLM: two jobs, both fenced, and measured against itself
 
 The regex scores **100% on dev (23/23) and 2 of 23 on held out** — and both of those hits are
 injected stray credits, so on held-out *settlement* narrations it is **0 of 21**. That gap — not the
-arithmetic — is the only place an LLM earns a role here. So it gets exactly one job: extract a UTR
-from a narration no parser was written for. It never chooses between settlements, never explains a
-residual, never touches an amount.
+arithmetic — is the only place inside the resolver where an LLM earns a role. So job one is exactly
+that and nothing more: extract a UTR from a narration no parser was written for. It never chooses
+between settlements, never explains a residual, never touches an amount.
+
+Job two sits at the **ingest boundary**, not in the resolver, and is described below.
 
 Every proposal is re-verified by **exact lookup**. A UTR either resolves to a known settlement or it
 does not; there is no "close enough" and no scoring step a confident wrong answer can win.
@@ -413,6 +431,59 @@ An **empty** answer is also not a hallucination: the prompt tells the model an e
 when no UTR is present, so abstention counts as unverifiable. Found when a *perfect oracle* scored a
 hallucination.
 
+### Job two: repairing a schema nobody warned us about
+
+`extra="forbid"` at ingest is deliberate — BRIEF §8 names "column renamed" as a failure to engineer
+against, and a renamed column fails **loudly**. What it also does is fail *every row of that view
+identically*, so the realistic shape is not one bad row but the whole view gone. And no rule recovers
+it: **you cannot write a regex for a column name you have not seen.**
+
+That is the second place an LLM earns a role, and it is at the boundary rather than in the resolver.
+It proposes a mapping from the observed columns to the schema's fields. It is shown the column names,
+the target field names and **one** sample row — never the identities, never the rate card, never
+ground truth, because a model told what would make an answer verify can write to the test.
+
+**Four gates, all exact, and a proposal must survive every one:**
+
+| Gate | Rejects |
+|---|---|
+| **Structural** | a field name that does not exist, a non-injective mapping, required fields unmapped — the analogue of refusing an invented UTR |
+| **Total re-validation** | any mapping under which even one quarantined row fails Pydantic, `extra="forbid"` still enforced. Not most rows. All of them |
+| **Containment** | a mapping that type-checks and is arithmetic nonsense — `tax > fee`, `fee > amount`, a line moving money both ways |
+| **Utility** | a mapping that validates but leaves the view unable to serve its join, e.g. `bank_ref` swapped with `narration` |
+
+**The containment gate is the one worth explaining, because the obvious version of it was wrong.**
+The natural check is the GST identity — tax is 18% of the MDR base. Measuring killed it: it fails on
+**17 of 890** fee-bearing dev rows and **13 of 885** on eval, because GST mismatch is an anomaly the
+generator injects *on purpose*. Gating on it would reject a **correct** mapping precisely because the
+data contains the defect the system exists to find. So the gate asks whether a column is still the
+thing it claims to be — never whether the money was right, which is Tier 1's job and may legitimately
+be no.
+
+**The ablation. Same drifted input, three adjudicators** — `settlement_lines.jsonl` with one column
+renamed:
+
+| | rules only | correct mapping | fee/tax swapped |
+|---|---|---|---|
+| **dev** — rows quarantined | 1,732 | **0** | 1,732 |
+| explanation rate | 0/23 | **17/23** | 0/23 |
+| false clear, in remit | **190/195** | **0/195** | 190/195 |
+| **eval** — rows quarantined | 1,789 | **0** | 1,789 |
+| explanation rate | 0/23 | **18/23** | 0/23 |
+| false clear, in remit | **180/187** | **0/187** | 180/187 |
+| statement foots | yes | yes | yes |
+
+**A verified repair restores the run to exactly what it would have been** — 17/23 and 0/195 on dev,
+18/23 and 0/187 on eval are byte-for-byte the clean-run figures. Not "close to". The same.
+
+**And that 190/195 reframes our own headline.** In-remit false clear must be zero, and it has been
+zero on every run for eight days. It is zero **conditional on the inputs loading**, and nothing before
+this made that condition visible. The guarantee was never as unconditional as this README implied.
+
+**What is not claimed:** every number above comes from test doubles — a truthful mapper, a hostile
+one, three structurally invalid ones. That measures **the fence**. It says nothing about how often a
+real model proposes a correct mapping, and that number appears nowhere (D-022, D-036).
+
 ### Determinism, and where it stops
 
 Same seed ⇒ byte-identical `metrics.json`, for the shipped rules-only path and for any deterministic
@@ -439,6 +510,13 @@ the report contradicts itself, so `ROLLUP_MISMATCH` is raised and **nothing post
 Detected reliably; not resolvable from this extract, because the reconciler cannot tell a stale total
 from a line item that should not be there. It is also the one case where an extractor beats every
 deterministic tier — see the ceiling section above.
+
+**A source view that will not load at all.** Schema repair recovers a *renamed* column and proves the
+mapping before using it. It cannot invent a column that is simply gone, and it does not try: the view
+stays quarantined, `SOURCE_VIEW_INCOMPLETE` is raised against it, and **every claim that reasons from
+a missing row is withheld** rather than published. Before 02 Sep it was not withheld — one renamed
+column produced 21 `MISSING_BANK_CREDIT` breaks asserting *"every credit in the statement was read"*
+([F-018](FAILURE_LOG.md)).
 
 **Also deliberately absent:** subset-sum candidate search · multi-gateway · a second merchant scenario
 · FX · TDS 194-O (out by merchant persona) · a realistic UTR format, which is the last known realism
@@ -498,9 +576,11 @@ src/recon/
   domain/truth.py        ground truth, designed backwards from false-clear
   generate/              world simulator -> derived views + ground truth
   ingest/                Pydantic validation at the boundary, quarantine
-  resolve/tier0.py       exact-key joins + identity checking
+  resolve/tier0.py       exact-key joins + identity checking + source-completeness gating
   resolve/tier1.py       variance decomposition against the rate card
+  resolve/tier2.py       exact-amount corroboration inside the posting window
   resolve/tier3.py       the fenced adjudicator + the verifier gate
+  resolve/schema_repair.py  the second fenced job: a column mapping, four exact gates
   llm/                   the seam: protocol, cache, null and Anthropic adjudicators
   ledger/statement.py    footing statement + balanced journal entries
   report/                metrics harness and the exception queue
@@ -509,5 +589,5 @@ src/recon/
 
 [PLAN.md](PLAN.md) — every decision and what it ruled out ·
 [RUN_LOG.md](RUN_LOG.md) — measured results per gate ·
-[FAILURE_LOG.md](FAILURE_LOG.md) — seventeen real incidents, dated as they happened ·
+[FAILURE_LOG.md](FAILURE_LOG.md) — eighteen real incidents, dated as they happened ·
 [STUDY_PLAN.md](STUDY_PLAN.md)
