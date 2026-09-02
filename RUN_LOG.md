@@ -1290,3 +1290,108 @@ structure exists.
 | Tests: dates collide, amounts never collide exactly, dev unchanged, determinism | 45 min |
 | Full invariant suite, determinism, false clear, both seeds | 20 min |
 | RUN_LOG result entry | 30 min |
+
+---
+
+## RESULT — second-gateway credits on eval · 02 Sep 2026
+
+Measured against the pre-registration recorded earlier the same day, which was written before any
+code was touched. Every number below is from a run on this machine, not inferred.
+
+Method: `python -m recon eval` with the knob at 6 (29 bank rows), against a knob-off generation of
+the same seed into a scratch directory (23 bank rows). The two runs differ **only** by
+`second_gateway_credit_count`. The ceiling is the oracle's explanation-rate numerator minus the
+rules-only numerator, using the same `_oracle_for` helper `tests/test_tier3_fence.py` uses.
+
+### The falsifiable core: CONFIRMED. The ceiling did not rise.
+
+| | knob off | knob on |
+|---|---|---|
+| rules-only explanation rate | 18/23 | 18/29 |
+| with a perfect extractor (oracle) | 18/23 | 18/29 |
+| **ceiling — what the oracle adds** | **0** | **0** |
+
+The mechanism held exactly as reasoned off `tier2.resolve`: Tier 2 keys on `int(amount)` into a dict
+built at `tier2.py:120-125`, so an amount-proximate credit hits no key, produces no link, and is not
+a rival to any settlement's real credit. **Exactness is immune to proximity**, and same-day
+near-miss credits handed the LLM no work it could not already have had.
+
+One correction to the prediction's own baseline: it said the ceiling would "stay at 1". The measured
+ceiling was **0 before the change and 0 after**. The hypothesis (does not rise) is confirmed; the
+figure quoted for the starting point was wrong.
+
+### Scorecard against the predicted table
+
+| row | predicted | measured | |
+|---|---|---|---|
+| Oracle ceiling | unchanged | 0 → 0 | **confirmed** |
+| Live model accepted links | 0 | 0 (no key; oracle/hostile only) | confirmed, unmeasurable in the real sense |
+| Adjudicator calls | 3 → ~3+injected | **3 → 9** | **confirmed exactly** |
+| `blocked_unverifiable` | rises by about the same | **1 → 7** | **confirmed** |
+| Explanation rate | falls, ~18/23 → ~18/29 | **18/23 → 18/29** (78.26% → 62.07%) | **confirmed exactly** |
+| `UNMATCHED_BANK_CREDIT` raised | +6 | **0. Stayed at 2** | **FALSIFIED** |
+| False clear, in remit | 0.00% | 0.00% | confirmed |
+| Linkage precision | 100.00% | 100.00% (3506/3506) | confirmed |
+
+### The falsified row is the most interesting result here
+
+The prediction assumed a second-gateway credit would be *typed* `UNMATCHED_BANK_CREDIT`. It is not.
+All six are raised as `NARRATION_UNPARSEABLE`, `is_break=False`.
+
+The cause is an ordering fact in `tier0._resolve_bank_credits`: the `utr is None` branch
+(`tier0.py:401`) fires **before** the settlement lookup (`tier0.py:435`) that raises
+`UNMATCHED_BANK_CREDIT`. Second-gateway credits render from held-out narration families, so no UTR is
+extracted, and they never reach the branch the prediction expected. The prediction reasoned about
+what these credits *are* and ignored the order in which the resolver *discovers* things.
+
+**The resolver is not wrong.** Truth types the credit by its cause — another aggregator's money.
+The resolver types it by its observable state — the narration will not parse. Both are correct
+descriptions of the same row, and `exception_typing_accuracy` cannot hold both:
+
+| | knob off | knob on |
+|---|---|---|
+| exception typing accuracy | 98.93% (185/187) | **95.85% (185/193)** |
+| exception detection recall | 100.00% (187/187) | **100.00% (193/193)** |
+
+Detection recall is unmoved because `flagged_subjects` keys on `subject_id` regardless of code — every
+credit was found. Only the label differs. This was not predicted in either direction and is recorded
+as an unforced finding.
+
+### Costs, paid as recorded
+
+Both costs registered in advance were incurred and neither was discovered late. `eval` is now
+structurally different from `dev` rather than a different draw of the same generator, so any dev/eval
+difference is confounded while the knob is set. D-016's reasoning is untouched.
+
+**The honest sentence, which the pre-registration required in advance: the ceiling did not rise, so
+there is no interesting answer to report.** The experiment was run to falsify a claim about the LLM's
+value and it failed to falsify it. Manufacturing an exact-to-the-paise collision would raise the
+ceiling, and that is precisely the Sec 9 anti-pattern the pre-registration committed not to build.
+
+### Two defects found in the experiment's own code, recorded not fixed
+
+**1. The collision guard is weaker than its docstring.** `_inject_second_gateway` builds its
+exclusion set from **true** settlement amounts (`world.py:935`), but Tier 2 indexes on the amount the
+settlement entity **reports** (`derive.py:123-125`), and `_inject_stale_totals` runs *after*
+`_inject_second_gateway` (`world.py:366-369`). A draw landing on a stale reported total would create
+the exact-value collision the guard exists to prevent, and Tier 2 would link it. Not observed on this
+seed; the docstring's "never colliding with ANY of our settlement amounts" claims more than the code
+delivers.
+
+**2. `_is_faithful_reading` will mis-attribute a real model on this data.** Not measured — the oracle
+returns an empty proposal for a ref it has no true edge for, and an empty answer is correctly not a
+hallucination (`tier3.py:182-188`), which is why all six landed in `blocked_unverifiable`. But a real
+model that *correctly* reads the UTR out of `RTGS CR PAYSWIFT<utr>SETTLEMENT` is followed by more
+alphanumerics, so `tier3.py:94-96` would score it `blocked_hallucination`. The bias is documented at
+`tier3.py:85-88` and is deliberately the safe direction, but with these narrations present the
+published hallucination count would overstate model error. Flagged for the day a key exists.
+
+### Disposition
+
+The implementation is **stashed, not discarded** — the result is now recorded, so the prediction is
+closed either way. Nothing about the knob ships: it stays at `0` by default, `dev` is provably
+untouched (23 rows, zero `PAYSWIFT`), and the entire test suite constructs `GenConfig` without
+`anomalies=`, so no gate condition depends on it.
+
+Elapsed: under the 2h 15m estimate, because the generator work was already done when the result
+was measured.
