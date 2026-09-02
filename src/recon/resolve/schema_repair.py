@@ -65,9 +65,11 @@ from ..ingest.load import (BANK_VIEW, BOOKS_VIEW, LINES_VIEW, SETTLEMENTS_VIEW,
                            QuarantinedRow, Repository)
 from ..ingest.schemas import (BankCreditRow, BookEntryRow, SettlementLineRow,
                               SettlementRow)
-from ..llm.client import AdjudicationRequest, Adjudicator, LLMStats, ResponseCache
+from ..llm.client import (JOB_MAP_SCHEMA, AdjudicationRequest, Adjudicator,
+                         LLMStats, ResponseCache)
 
-JOB_MAP_SCHEMA = "map_schema"
+# Re-exported from the seam so existing importers keep working.
+__all__ = ["repair", "JOB_MAP_SCHEMA"]
 
 MODEL_FOR_VIEW = {
     BOOKS_VIEW: BookEntryRow,

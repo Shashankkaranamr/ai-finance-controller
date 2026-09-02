@@ -9,15 +9,19 @@ INSIDE the constructor. With the SDK absent, or the key absent, this class
 reports `available = False` with a reason and the pipeline degrades exactly as it
 does with no adjudicator at all -- which is the path every run takes today.
 
-UNEXERCISED AGAINST THE LIVE API
---------------------------------
-There is no API key in the environment this was written in, so the request shape
-below has never been sent. It is written against the documented Messages API
-surface and deliberately uses the narrowest, most stable part of it -- one
-`messages.create` call, a system prompt, and `json.loads` on the text block --
-rather than a richer feature we could not verify.
+WHAT HAS AND HAS NOT BEEN SENT
+------------------------------
+`parse_narration` HAS been exercised live: 22 held-out narrations on 01 Sep 2026,
+`claude-haiku-4-5`, one call each (RUN_LOG, "Increment 3 -- LIVE adjudicator
+run"). That run is what produced `_unfence` and the 600-character error budget
+below. This docstring previously said the request shape had never been sent; that
+was true when it was written and stopped being true the next day.
 
-That is a real limitation and it is stated rather than hidden. It is also
+`map_schema` has NOT been sent. It is wired below against the same narrow surface
+-- one `messages.create` call, a system prompt, `json.loads` on the text block --
+and until a live run happens that is a claim about the code, not a measurement.
+
+Either way it is
 survivable by construction: every proposal this class returns is re-verified by
 exact lookup in `resolve/tier3.py`, so a malformed response, a wrong UTR or a
 total failure all land in the same place -- rejected, counted, and the run
@@ -29,7 +33,8 @@ import json
 import os
 from dataclasses import dataclass, field
 
-from .client import AdjudicationRequest, AdjudicationResult
+from .client import (JOB_MAP_SCHEMA, JOB_PARSE_NARRATION, AdjudicationRequest,
+                     AdjudicationResult)
 
 # Haiku tier, deliberately. This job is a short extraction from one line of free
 # text with a fixed output shape -- no reasoning, no long context, no tool use.
@@ -93,6 +98,32 @@ because it will be checked against real settlements and a mismatch is recorded \
 as a hallucination."""
 
 
+# A SECOND JOB, AND WHAT THIS PROMPT DELIBERATELY DOES NOT SAY
+# -------------------------------------------------------------
+# It states the OUTPUT CONTRACT -- one-to-one, cover every observed column, invent
+# no field names -- because a model that does not know the required shape cannot
+# answer at all, exactly as the narration prompt states its JSON shape.
+#
+# It says nothing about what makes a mapping VERIFY. The containment checks in
+# `resolve/schema_repair.py` (tax <= fee, fee <= amount, ...) are never mentioned,
+# and neither are the identities or the rate card. A model told the test can write
+# to the test, and the whole value of the gate is that it is an independent
+# opinion about the answer.
+MAP_SCHEMA_SYSTEM_PROMPT = """You map the columns of a financial data file onto a fixed target schema.
+
+You are given the column names actually present in the file, the field names the schema declares, and one sample row. Column names may have been renamed, abbreviated, or reordered by whoever produced the file. Use the sample row's VALUES to decide what each column really holds.
+
+Reply with a single JSON object and nothing else:
+{"mapping": {"<observed column>": "<target field>", ...},
+ "rationale": "<one short sentence on what the values told you>"}
+
+Rules, all strict:
+- Map EVERY observed column exactly once. Do not omit one.
+- Every target field you name must be one of the target fields given to you. Do not invent a field name.
+- No two observed columns may map to the same target field.
+- If you cannot work out a column with confidence, still return your best one-to-one mapping; a mapping that is wrong is rejected safely, but a malformed one tells us nothing."""
+
+
 @dataclass(slots=True)
 class AnthropicAdjudicator:
     """Adjudicator backed by the Anthropic Messages API.
@@ -129,22 +160,49 @@ class AnthropicAdjudicator:
         return self._client is not None
 
     def adjudicate(self, request: AdjudicationRequest) -> AdjudicationResult:
-        """One call, one narration. Never raises -- callers must degrade, not crash."""
+        """One call, one subject. Never raises -- callers must degrade, not crash."""
         if self._client is None:
             self.calls_declined += 1
             return AdjudicationResult(ok=False, reason_unavailable=self.reason)
 
-        narration = str(request.payload.get("narration", ""))
+        # DISPATCH ON THE JOB, and refuse an unwired one loudly.
+        #
+        # This used to read `payload["narration"]` unconditionally. A map_schema
+        # request carries no such key, so it would have sent an EMPTY user message
+        # under the narration prompt and returned no `mapping` -- which
+        # schema_repair would score as blocked_bad_mapping. That number would have
+        # measured this method, not the model, and it would have looked exactly
+        # like a real result.
+        if request.job == JOB_PARSE_NARRATION:
+            system = SYSTEM_PROMPT
+            content = str(request.payload.get("narration", ""))
+        elif request.job == JOB_MAP_SCHEMA:
+            system = MAP_SCHEMA_SYSTEM_PROMPT
+            content = json.dumps(request.payload, sort_keys=True, indent=1)
+        else:
+            self.calls_declined += 1
+            return AdjudicationResult(
+                ok=False,
+                reason_unavailable=f"job {request.job!r} is declared but not wired "
+                                   "into this adjudicator; no call was made")
+        if not content.strip():
+            # The API rejects an empty message, and a 400 here would be recorded as
+            # a model failure. An empty subject is our bug, so say so.
+            self.calls_declined += 1
+            return AdjudicationResult(
+                ok=False,
+                reason_unavailable=f"empty payload for job {request.job!r}; no call was made")
+
         try:
             response = self._client.messages.create(
                 model=self.model,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=system,
                 # No `output_config.effort` and no `thinking`. Both are deliberate:
                 # the effort parameter is not supported on the Haiku tier and would
                 # be rejected outright, and this task wants no thinking at all --
                 # it is a one-line extraction with a fixed output shape.
-                messages=[{"role": "user", "content": narration}],
+                messages=[{"role": "user", "content": content}],
             )
             text = "".join(block.text for block in response.content
                            if getattr(block, "type", None) == "text")
@@ -167,6 +225,22 @@ class AnthropicAdjudicator:
             self.calls_declined += 1
             return AdjudicationResult(ok=False,
                                       reason_unavailable="response was not a JSON object")
+
+        if request.job == JOB_MAP_SCHEMA:
+            # Pass the mapping through UNVALIDATED beyond "it is a dict of strings".
+            # Every structural check belongs to the verifier in schema_repair, and
+            # duplicating it here would mean a rejection could come from two places
+            # and the counter could not say which.
+            mapping = payload.get("mapping")
+            if not isinstance(mapping, dict):
+                self.calls_declined += 1
+                return AdjudicationResult(
+                    ok=False, reason_unavailable="response carried no `mapping` object")
+            return AdjudicationResult(
+                ok=True,
+                data={"mapping": {str(k): str(v) for k, v in mapping.items()}},
+                rationale=str(payload.get("rationale", "")),
+            )
 
         return AdjudicationResult(
             ok=True,

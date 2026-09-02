@@ -49,11 +49,13 @@ from ..domain.graph import (ComponentBasis, ComponentType, Decomposition, EdgeKi
                             VarianceComponent)
 from ..domain.rates import RULE_VERSION
 from ..ingest.load import Repository
-from ..llm.client import AdjudicationRequest, Adjudicator, LLMStats, ResponseCache
+from ..llm.client import (JOB_PARSE_NARRATION, AdjudicationRequest, Adjudicator,
+                         LLMStats, ResponseCache)
 from ..money import Paise
 from ..report.exceptions import ExceptionRecord
 
-JOB_PARSE_NARRATION = "parse_narration"
+# Re-exported from the seam so existing importers keep working.
+__all__ = ["resolve", "JOB_PARSE_NARRATION"]
 
 
 def _is_faithful_reading(proposed: str, narration: str) -> bool:

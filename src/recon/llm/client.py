@@ -21,6 +21,18 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 
+# The job names the `job` field may carry, defined on the seam that OWNS the
+# field rather than in the resolvers that raise them. An adjudicator has to
+# dispatch on the job to serve more than one, and importing a resolver into the
+# vendor client to learn a string would invert the layering.
+#
+# Only these two are wired. `rank_candidates` and `classify_residual` are named in
+# the field's docstring below and stay unbuilt: neither has an independent
+# verifier, which is the admission test (D-036).
+JOB_PARSE_NARRATION = "parse_narration"
+JOB_MAP_SCHEMA = "map_schema"
+
+
 @dataclass(frozen=True, slots=True)
 class AdjudicationRequest:
     """Everything the adjudicator may see. Deliberately narrow.
