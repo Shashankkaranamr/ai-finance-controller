@@ -406,3 +406,73 @@ def test_a_stale_total_is_queued_once_and_named_correctly(
     # degradation -- typing a component off a number we have just flagged as
     # untrustworthy would be a guess wearing an identity's clothes -- and either
     # way the settlement is queued once and posts nothing.
+
+
+# --- D-035: the pair artifact is measured, and the claim about it is checked ---
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_every_duplicate_payment_false_alarm_is_the_other_half_of_a_real_pair(
+        seed, generated, generated_eval, tmp_path_factory):
+    """The README states this. This is what stops it becoming untrue silently.
+
+    A duplicated payment is two lines carrying one order, and at detection time
+    nothing distinguishes the copy from the original — an analyst needs both rows
+    to decide. Truth labels one, so the other scores as a false alarm. That is a
+    SCORING artifact, and the published headline absorbs it deliberately (D-035).
+
+    The claim is only defensible while every such alarm really is a pair half. The
+    moment the resolver raises DUPLICATE_PAYMENT on a line with no genuine
+    duplicate behind it, that is real queue noise wearing the artifact's clothes,
+    and this test fails rather than letting the README keep saying otherwise.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = _repo(data_dir)
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+    result = pipeline.run(data_dir, tmp_path_factory.mktemp("pairs") / seed)
+
+    labelled = {u.uid for u in truth.units if u.anomaly == "DUPLICATE_PAYMENT"}
+    raised = [r for r in result.exceptions if r.code == "DUPLICATE_PAYMENT"]
+    assert raised, "no DUPLICATE_PAYMENT raised; this test is blind"
+
+    labelled_orders = {repo.lines[uid].order_id for uid in labelled
+                       if uid in repo.lines and repo.lines[uid].order_id}
+    spurious = []
+    for record in raised:
+        if record.subject_id in labelled:
+            continue
+        line = repo.lines.get(record.subject_id)
+        if line is None or line.order_id not in labelled_orders:
+            spurious.append(record.subject_id)
+
+    assert not spurious, (
+        f"{seed}: {len(spurious)} DUPLICATE_PAYMENT alarms have no genuine duplicate "
+        f"behind them: {spurious[:5]}. These are real queue noise, not the pair "
+        "artifact the README describes, and the published explanation is now wrong")
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_conservative_queue_precision_stays_the_headline(
+        seed, generated, generated_eval, tmp_path_factory):
+    """Both numbers are published, and the stricter one leads.
+
+    The collapsed figure is only ever friendlier — on the held-out seed it reads
+    100.00% — and it is strictly less sensitive: under it, flagging the WRONG half
+    of a pair would still score as a correct detection. Publishing it alone would
+    be replacing a conservative measurement with a flattering one, which is the
+    F-005 failure. Publishing it beside the headline is the D-005 pattern.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    result = pipeline.run(data_dir, tmp_path_factory.mktemp("headline") / seed)
+    m = result.metrics
+
+    assert m.exception_queue_precision.denominator > 0
+    assert m.exception_queue_precision_pairs_collapsed is not None, (
+        "the secondary figure must be published, not left implicit in prose")
+    assert (m.exception_queue_precision_pairs_collapsed.bps
+            >= m.exception_queue_precision.bps), (
+        "the collapsed figure should never be stricter; if it is, the pairing "
+        "logic is counting something it should not")
+    assert m.paired_detection_alarms == sum(
+        n for code, n in m.false_alarms_by_code.items() if code == "DUPLICATE_PAYMENT"), (
+        "the artifact count and the per-code false alarms disagree, so one of them "
+        "is measuring the wrong population")

@@ -1119,3 +1119,88 @@ recovering the two settlements whose stale totals put them beyond any amount-bas
 links convert to **zero** additional explained settlements, because the report still contradicts
 itself and nothing posts. Both halves are published together, because the first without the second
 would overstate what extraction buys.
+
+---
+
+## Review response — items 1, 3, 4 · 02 Sep 2026
+
+An external senior review (acting as a Razorpay technical evaluator) scored the repo **81/100** and
+named one clear gap: the adjudicator has never been validated against the live API in its corrected,
+post-C-2(a) form. Four items were assigned; this entry records the three that do not need a key.
+
+### 1 — Pushed
+
+11 commits to `origin/main`. Remote HEAD `bc46d91` verified against `git ls-remote`, not against the
+cached tracking ref.
+
+### 2 — BLOCKED, not done, and nothing stale was edited
+
+`python -m recon ablation --seed eval` reports **`adjudicator unavailable: no ANTHROPIC_API_KEY in the
+environment`**, so its second column is the degraded path: **0 adjudicator calls, `degraded: True`**.
+That is not a model result and is not published as one. The stale 5/3/4-of-22 citations are left in
+place with their existing "superseded run" labels, because replacing measured figures with
+degraded-path zeros would be worse than leaving them.
+
+*(`--llm` is not a flag on `ablation`. That subcommand exists to compare with and without the
+adjudicator, so it always attempts one; the flag applies to `run`, `demo` and `eval`. README corrected.)*
+
+**A correction to the review's framing, worth stating before the key is spent.** The review said the
+denominator should be 23 rather than 24. That is right for *bank credits* and wrong for the
+adjudicator, whose denominator moved for a different reason:
+
+| | at the 5/3/4-of-22 run | today |
+|---|---|---|
+| Credits the adjudicator is asked about | 22 | **3** |
+| Why | no narration parsed, so every credit went to Tier 3 | Tier 2 places 18 first; only the residue is asked |
+| Oracle ceiling, explanation | 1 of 24 | **0 of 23** |
+| Oracle ceiling, linkage | — | **2 edges** (the stale-total settlements) |
+
+So the live run produces a number out of **3**, and a *perfect* extractor scores zero additional
+explained credits on them. The question worth buying an API call for is therefore not "what does the
+LLM add" — the oracle already answers that — but **"does a real model reach the ceiling the oracle
+sets", i.e. does it recover the two stale-total links.**
+
+### 3 — The pair artifact in queue precision (D-035)
+
+DUPLICATE_PAYMENT is raised on **both** lines of a pair because at detection time nothing
+distinguishes the copy from the original, and an analyst needs both rows to decide which to reverse.
+Truth labels one, so the other scores as a false alarm. Measured, not assumed:
+
+| | dev | eval |
+|---|---|---|
+| DUPLICATE_PAYMENT raised | 20 | 28 |
+| …truth-labelled (scored real) | 10 | 14 |
+| …scored as false alarms | 10 | 14 |
+| **…of those, the other half of a genuine pair** | **10 of 10** | **14 of 14** |
+| **…spurious, with no duplicate behind them** | **0** | **0** |
+
+**We kept the conservative headline and published the split**, rather than rescoring. Collapsing pairs
+would move dev to 99.49% and eval to **100.00%** — a change whose only effect is to improve our own
+number, adopted after seeing that it does, which is the F-005 failure. It is also strictly less
+sensitive: under it, flagging the *wrong* half of a pair would still score as a correct detection.
+Both figures are now in `metrics.json` and in the run output, stricter one first. Full reasoning and
+the rejected option in **D-035**.
+
+The claim "every such alarm is a genuine pair half" is now a **test**, not a sentence, so it fails
+loudly if real queue noise ever arrives wearing the artifact's clothes.
+
+### 4 — README restructured
+
+The measured table now opens the file, above all prose: headline rates, the ablation, throughput,
+determinism and test count inside the first screen. Three reading notes sit under it — why the numbers
+went *down* on 02 Sep, what queue precision absorbs, and why the headline is never a single number.
+
+### Measured after items 3 and 4
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate · coverage | 73.91% (17/23) · 77.27% (17/22) | 78.26% (18/23) · 81.82% (18/22) |
+| Exception queue precision | **94.69%** (196/207) | **93.00%** (186/200) |
+| …pairs collapsed *(secondary)* | 99.49% (196/197) | 100.00% (186/186) |
+| False clear, in remit | **0.00%** (0/195) | **0.00%** (0/187) |
+| Linkage precision | 100.00% | 100.00% |
+| Statement foots | YES | YES |
+| Determinism, incl. regeneration | byte-identical | byte-identical |
+| Tests | **211 passed** | — |
+
+No metric moved as a result of items 3 or 4. Two were added; none was changed.

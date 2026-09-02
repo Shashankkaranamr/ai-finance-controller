@@ -1,15 +1,96 @@
 # AI Finance Controller — three-way settlement reconciliation
 
-**Razorpay Buildathon, Track 04.** Status: **Increments 0–3 complete**, plus a realism increment on
-02 Sep that closed three acknowledged gaps in the generator and re-measured everything.
-This is an incremental build: [PLAN.md](PLAN.md) records every decision and what each one ruled out.
+**Razorpay Buildathon, Track 04.** Three-way settlement reconciliation — books ↔ Razorpay settlement
+report ↔ bank statement — with typed variance decomposition, an auto-posting ledger, and an honest
+exception queue. A deterministic pipeline with the LLM fenced into one job it cannot corrupt.
 
-**If you read one thing, read [Is "the LLM adds nothing" a fact, or an artifact of our own data?](#is-the-llm-adds-nothing-a-fact-or-an-artifact-of-our-own-data)**
-— we tested our own headline finding against our own simulator and published which half survived.
+```bash
+python -m venv .venv && .venv/Scripts/activate     # Windows;  source .venv/bin/activate elsewhere
+pip install -e ".[dev]" && python -m recon demo     # clean clone -> working demo in ~31 s
+```
+
+## The numbers, first
+
+88 days · 22 settlement cycles · ~1,750 line items · ~3,400 records per seed. `dev` is the seed we
+tune on. **`eval` is held out — a different world *and* narration templates the parser has never
+seen.** Every figure below is reproduced by `python -m recon demo` and `python -m recon eval`.
+
+| | dev | eval (held out) |
+|---|---|---|
+| **Explanation rate · settlement coverage** | **73.91%** (17/23) · **77.27%** (17/22) | **78.26%** (18/23) · **81.82%** (18/22) |
+| Money-weighted coverage | 77.06% | 82.16% |
+| **Linkage precision** *(lead with this)* | **100.00%** (3,387/3,387) | **100.00%** (3,506/3,506) |
+| …at the bank grain *(the one an adjudicator can reach)* | **19/19** | **18/18** |
+| Linkage recall | 99.97% | 99.94% |
+| Exception detection recall | **100.00%** (195/195) | **100.00%** (187/187) |
+| **False-clear, in remit** *(the dangerous class — must be zero)* | **0.00%** (0/195) | **0.00%** (0/187) |
+| **Exception queue precision** *(raised breaks that are real)* | **94.69%** (196/207) | **93.00%** (186/200) |
+| …with each correctly-found pair counted once *(secondary, see below)* | 99.49% (196/197) | 100.00% (186/186) |
+| Exception typing accuracy | 100.00% | 98.93% |
+| Decomposition closure *(no linkage, no ground truth)* | 90.91% (20/22) | 90.91% (20/22) |
+| Intrinsic clean rate *(a property of the DATA)* | 89.03% | 89.37% |
+| Narration parse rate *(regex)* | 100.00% (23/23) | **8.70%** (2/23) |
+| Journal entries, all balanced | 17 | 18 |
+| **Reconciliation statement** | **foots to zero** | **foots to zero** |
+| Throughput | 3,326 records in ~0.4 s | 3,434 records in ~0.4 s |
+| Determinism | byte-identical `metrics.json` across two runs, a regeneration **and a fresh clone** | same |
+| Tests | **211**, green on a clean clone with `data/` absent | — |
+
+### The ablation — what each tier is actually worth
+
+| Cumulative | dev | eval (held out) |
+|---|---|---|
+| T0 · narration join | **0.00%** (0/23) | 0.00% (0/23) |
+| + T1 · arithmetic | **73.91%** (17/23) | 0.00% (0/23) |
+| + T2 · exact amount in the posting window | 73.91% | **78.26%** (18/23) |
+| + T3 · LLM | 73.91% | **78.26% — adds nothing** |
+
+**Tier 0 alone explains nothing on realistic data.** It finds the counterparty and proves the report
+is internally consistent — worth having — but on a merchant with a rolling reserve it cannot explain a
+single rupee of the gross-to-cash gap. Explaining the amount is the job, and that is a measured number
+here rather than a claim.
+
+### Three things these numbers will not tell you unless you read them carefully
+
+**They went DOWN on 02 Sep, and that is the system working.** Closing three acknowledged realism gaps
+in the generator revealed that two settlements per seed were being reported as fully explained — and
+posting journal entries — while the settlement report contradicted itself. A headline that falls when
+the data gets more honest was measuring the wrong thing before. See
+[F-016](FAILURE_LOG.md) and [F-017](FAILURE_LOG.md).
+
+**Queue precision is deliberately conservative, and here is exactly what it absorbs.** A duplicated
+payment is *two* lines carrying one order, and at detection time nothing distinguishes the copy from
+the original — an analyst needs both rows to decide which to reverse. Ground truth labels one, so the
+other scores as a false alarm. **All 10 dev and all 14 eval false alarms of this code are that pair
+half; none is a spurious flag**, and a test asserts it so the sentence cannot quietly stop being true.
+Collapsing each pair to one finding gives the secondary row above. **The conservative number stays the
+headline** — the collapsed one is only ever friendlier, and it is strictly less sensitive, because
+under it flagging the *wrong* half of a pair would still score as correct (D-035).
+
+**"Match rate" is not the headline, and never a single number.** Exact UTR joins clear essentially
+everything; finding the counterparty is easy. The headline is explanation rate **and** settlement
+coverage together, because a settlement that never produced a bank credit is invisible in the first
+denominator — measured at Increment 0, where explanation read 100.00% while coverage read 83.33%
+(D-005). Formulas for every numerator and denominator are [below](#metrics--the-formulas-in-full).
+
+### The finding worth your attention
+
+We asked whether our own headline result — *the LLM adjudicator adds nothing* — is a fact about
+reconciliation or an artifact of data we wrote ourselves, and published which half survived:
+**[Is "the LLM adds nothing" a fact, or an artifact of our own data?](#is-the-llm-adds-nothing-a-fact-or-an-artifact-of-our-own-data)**
+
+---
+
+**Status:** Increments 0–3 complete, plus a realism increment on 02 Sep that closed three
+acknowledged generator gaps and re-measured everything. This is an incremental build:
+[PLAN.md](PLAN.md) records every decision and what each one ruled out · [RUN_LOG.md](RUN_LOG.md) has
+the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has seventeen real
+dated incidents · [ARCHITECTURE.md](ARCHITECTURE.md) is the design walkthrough.
 
 ---
 
 ## The problem, in money terms
+
 
 A controller closing a cycle is not asking *"which bank credit is this?"* — the UTR answers that in
 seconds. They are asking *"why is this credit short of gross sales, and by exactly what?"* The answer
@@ -41,15 +122,18 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 207 tests
+pytest                                              # 211 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
 deterministic. Clean clone to working demo, measured on Windows with no `uv` and no `make`:
-**~50 s** against a 300 s budget. `make demo` forwards to the same entrypoint.
+**31 s** against a 300 s budget — clone, fresh venv, install, demo, re-verified 02 Sep with
+`data/` absent. `make demo` forwards to the same entrypoint.
 
-The LLM is **opt-in** (`--llm`, plus `pip install -e ".[llm]"` and `ANTHROPIC_API_KEY`). It is never
-enabled by the mere presence of a key, because it costs money and moves the numbers.
+The LLM is **opt-in**: `--llm` on `run`, `demo` and `eval`, plus `pip install -e ".[llm]"` and
+`ANTHROPIC_API_KEY`. It is never enabled by the mere presence of a key, because it costs money and
+moves the numbers. `ablation` needs no flag — comparing with and against the adjudicator is the whole
+point of that subcommand, so it always tries, and reports the degraded path when no key is present.
 
 ---
 
@@ -156,58 +240,24 @@ agreement with ourselves.
 
 ---
 
-## Measured
+## Measured — provenance of the table above
 
-88 days · 22 settlement cycles · ~1,750 line items · all four §3.1 line types · the full §3.3
-deduction stack. `dev` is the seed we tune on; `eval` is held out — a different world **and**
-narration templates the parser has never seen.
-
-| | dev | eval (held out) |
-|---|---|---|
-| **Explanation rate · settlement coverage** | **73.91%** (17/23) · **77.27%** (17/22) | **78.26%** (18/23) · **81.82%** (18/22) |
-| Money-weighted coverage | 77.06% | 82.16% |
-| **Decomposition closure** *(no linkage, no ground truth)* | **90.91%** (20/22) | **90.91%** (20/22) |
-| **Linkage precision** | **100.00%** (3,387/3,387) | **100.00%** (3,506/3,506) |
-| …at the bank grain *(the one an adjudicator can reach)* | **19/19** | **18/18** |
-| Linkage recall | 99.97% | 99.94% |
-| Exception detection recall | 100.00% (195/195) | 100.00% (187/187) |
-| **False-clear, in remit** | **0.00%** (0/195) | **0.00%** (0/187) |
-| **Exception queue precision** *(raised breaks that are real)* | **94.69%** (196/207) | **93.00%** (186/200) |
-| Exception typing accuracy | 100.00% | 98.93% |
-| Intrinsic clean rate *(from ground truth)* | 89.03% | 89.37% |
-| Narration parse rate *(regex)* | 100.00% (23/23) | **8.70%** (2/23) |
-| Journal entries, all balanced | 17 | 18 |
-| Reconciliation statement | **foots to zero** | **foots to zero** |
-
-**These numbers went DOWN on 02 Sep, and that is the system working.** Closing three acknowledged
-realism gaps in the generator (below) showed that two settlements per seed were being reported as
-fully explained when the settlement report contradicted itself, and journal entries were posting on
-them. Decomposition closure fell from 100% to 90.91% for the same reason. A headline that falls when
-the data gets more honest was measuring the wrong thing before.
+The figures at the top of this file are produced by the two commands in [Run it](#run-it); nothing in
+this README is transcribed by hand. `dev` is the seed we tune on; `eval` is held out at the
+**template** level, not merely the seed level — the deterministic parser was written against `dev`
+narration families only, and the adjudicator prompt was written blind and has never been tuned
+against held-out results.
 
 **Queue precision is published because its absence hid a real defect.** The suite measured false
 clear — what we missed — with genuine rigour, and never measured what we *raised* that was not real.
 Under that blind spot the held-out queue reported 22 settlements as missing when 21 of those credits
-were in the bank file. Both directions are now published, per seed and per code (D-030, F-014).
+were sitting in the bank file. Both directions are now published, per seed and per code (D-030,
+F-014), and the pair artifact inside the number is measured rather than described (D-035).
 
-### The ablation — what each tier is actually worth
-
-| Cumulative | dev | eval (held out) |
-|---|---|---|
-| T0 · narration join | **0.00%** (0/23) | 0.00% (0/23) |
-| + T1 · arithmetic | **73.91%** (17/23) | 0.00% (0/23) |
-| + T2 · exact amount in the posting window | 73.91% | **78.26%** (18/23) |
-| + T3 · LLM | 73.91% | **78.26% — adds nothing** |
-
-**Tier 0 alone explains nothing on realistic data.** It finds the counterparty and proves the report
-is internally consistent — worth having — but on a merchant with a rolling reserve it cannot explain a
-single rupee of the gross-to-cash gap. The brief's thesis, that explaining the amount is the job, is a
-measured number here rather than a claim.
-
-The credits neither tier explains are not decomposition failures: two with no settlement behind them,
-a duplicate-UTR pair the resolver **deliberately declines to link**, and the settlements whose own
-reported total contradicts their line items — where the arithmetic closes but nothing posts, by
-design.
+**The credits the tiers do not explain are not decomposition failures.** They are credits with no
+settlement behind them, a duplicate-UTR pair the resolver **deliberately declines to link**, and the
+settlements whose own reported total contradicts their line items — where the arithmetic closes but
+nothing posts, by design.
 
 ---
 

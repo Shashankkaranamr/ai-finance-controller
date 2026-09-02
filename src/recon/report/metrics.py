@@ -81,6 +81,8 @@ class Metrics:
     residual_total: Paise = Paise(0)
     residual_by_component: dict[str, int] = field(default_factory=dict)
     linkage_precision_by_kind: dict[str, dict] = field(default_factory=dict)
+    exception_queue_precision_pairs_collapsed: Rate | None = None
+    paired_detection_alarms: int = 0
     injected_by_class: dict[str, int] = field(default_factory=dict)
     false_alarms_by_code: dict[str, int] = field(default_factory=dict)
     explained_by_basis: dict[str, int] = field(default_factory=dict)
@@ -120,6 +122,11 @@ class Metrics:
                 # Sec 6 names an inflated exception count as the thing that
                 # understates the agent. Publishing it was FIX-2.
                 "exception_queue_precision": self.exception_queue_precision.to_json(),
+                # Published beside the headline, never instead of it (D-035).
+                "exception_queue_precision_pairs_collapsed": (
+                    self.exception_queue_precision_pairs_collapsed.to_json()
+                    if self.exception_queue_precision_pairs_collapsed else None),
+                "paired_detection_alarms": self.paired_detection_alarms,
                 "false_alarms_by_code": dict(sorted(self.false_alarms_by_code.items())),
             },
             # Properties of the DATA, computed from ground_truth.json with no
@@ -197,6 +204,12 @@ class Metrics:
         ]
         for code, n in sorted(self.false_alarms_by_code.items(), key=lambda kv: -kv[1])[:4]:
             lines.append(f"      false alarms: {code:<34} {n}")
+        if self.paired_detection_alarms and self.exception_queue_precision_pairs_collapsed:
+            lines.append(
+                f"      ...of which the unlabelled half of a correctly-found pair: "
+                f"{self.paired_detection_alarms}")
+            lines.append(
+                "  " + self.exception_queue_precision_pairs_collapsed.line())
         lines += [
             "",
             "DATA REALISM (from ground truth, no resolver involved)",
@@ -363,6 +376,48 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
     exception_queue_precision = Rate(
         len(real), len(evaluable), "exception queue precision (raised breaks that are real)")
 
+    # --- the half of a pair that truth does not label -------------------------
+    # A duplicated payment is TWO lines carrying one order. At detection time the
+    # resolver cannot know which is the copy -- that is not a limitation to fix,
+    # it is the shape of the finding, and an analyst needs both rows to decide.
+    # Truth labels exactly one of them, so the other scores as a false alarm.
+    #
+    # This is a SCORING artifact, not queue noise, and the honest response is to
+    # measure it rather than to quietly stop counting it. `exception_queue_precision`
+    # above is unchanged and stays the headline; this counts how much of it is the
+    # artifact, so a reader can do the arithmetic themselves (D-035).
+    #
+    # Deliberately generic: a raised break that truth does not label, sharing its
+    # business key with another raised break that truth DOES label with the same
+    # code. It describes the class of artifact, not one exception type.
+    labelled_orders: dict[tuple[str, str], bool] = {}
+    for record in evaluable:
+        line = repo.lines.get(record.subject_id)
+        if line is None or line.order_id is None:
+            continue
+        if is_real(record):
+            labelled_orders[(record.code, line.order_id)] = True
+
+    paired_alarms = 0
+    for record in evaluable:
+        if is_real(record):
+            continue
+        line = repo.lines.get(record.subject_id)
+        if line is None or line.order_id is None:
+            continue
+        if labelled_orders.get((record.code, line.order_id)):
+            paired_alarms += 1
+
+    # The same population with each correctly-identified pair counted once. Shown
+    # BESIDE the headline, never instead of it: replacing a conservative number
+    # with a friendlier one is how a project stops measuring what matters (F-005),
+    # and this one is only ever friendlier. It is also strictly less sensitive --
+    # under it, flagging the WRONG half of a pair would still score as a correct
+    # detection, and the headline distinguishes those two cases.
+    exception_queue_precision_pairs_collapsed = Rate(
+        len(real), max(len(evaluable) - paired_alarms, 1),
+        "  ...with each correctly-identified pair counted once (secondary)")
+
     # --- properties of the DATA, not of the resolver --------------------------
     # Answers "is the synthetic data too clean?" (BRIEF Sec 5: 85-92% cleanly
     # resolvable). Computed from ground truth alone: the resolver's explanation
@@ -479,6 +534,8 @@ def compute(edges: list[ReconEdge], exceptions: list[ExceptionRecord],
         false_clear_out_of_remit=false_clear_out_of_remit,
         exception_typing_accuracy=exception_typing_accuracy,
         exception_queue_precision=exception_queue_precision,
+        exception_queue_precision_pairs_collapsed=exception_queue_precision_pairs_collapsed,
+        paired_detection_alarms=paired_alarms,
         linkage_precision_by_kind=linkage_precision_by_kind,
         false_alarms_by_code=false_alarms_by_code,
         intrinsic_clean_rate=intrinsic_clean_rate,

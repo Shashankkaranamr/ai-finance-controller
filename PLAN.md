@@ -1013,3 +1013,36 @@ change the answer.
 wrong on the domain facts, and the ranking that opened this increment was worth more than the list.
 **Supersedes:** the amount half of the "(amount, value_date) is a clean key" caveat, as written on
 01 Sep.
+
+### D-035 · Review response · 2026-09-02 · The pair artifact in queue precision is measured, not scored away
+**Decision:** `exception_queue_precision` is **unchanged** and stays the headline. Alongside it we
+publish `paired_detection_alarms` — raised breaks that truth does not label but which share a business
+key with a raised break truth *does* label under the same code — and a secondary
+`exception_queue_precision_pairs_collapsed` computed with each such pair counted once.
+**Why:** A duplicated payment is two lines carrying one order. At detection time nothing distinguishes
+the copy from the original, and an analyst needs both rows to decide which to reverse, so raising both
+is correct behaviour rather than noise. Ground truth labels exactly one, so the other scores as a
+false alarm. Measured: **10 of 10 dev and 14 of 14 eval** DUPLICATE_PAYMENT false alarms are that pair
+half; **none is a spurious flag**.
+**Why not simply rescore it (the rejected option):** collapsing pairs was the obvious fix and it is
+the wrong one, for two reasons.
+
+1. *It only ever helps us.* It moves dev 94.69% → 99.49% and eval 93.00% → **100.00%**. A scoring
+   change whose sole effect is to improve our own published number, adopted after seeing that it does,
+   is the F-005 failure — "quietly relaxing the condition at the gate is how a project stops measuring
+   the thing that matters". The test for honesty is whether we would make the same change if it made
+   the number worse, and we would not have gone looking for it.
+2. *It is strictly less sensitive.* Under pair-collapsing, flagging the **wrong** half of a pair still
+   scores as a correct detection. The conservative metric distinguishes those cases; the friendly one
+   cannot. Trading away discriminating power to gain seven points is a bad trade at any price.
+
+Publishing both halves and leading with the stricter is the pattern this project already uses twice:
+two headline denominators (D-005) and false clear split by remit (D-009). Neither replaced a number;
+both added one.
+**What it rules out:** Quoting the collapsed figure alone, and quoting queue precision without the
+attribution beside it. Also rules out "explain it in prose only" — the claim that every such alarm is
+a genuine pair half is now asserted by
+`test_every_duplicate_payment_false_alarm_is_the_other_half_of_a_real_pair`, so it fails loudly the
+moment real queue noise appears wearing the artifact's clothes, instead of the README quietly becoming
+false.
+**Supersedes:** —
