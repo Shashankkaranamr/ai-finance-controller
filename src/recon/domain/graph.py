@@ -187,6 +187,17 @@ class ExceptionType(Enum):
     # been read. Saying "missing" while 22 credits sit unparsed told treasury
     # Rs 33 lakh had not arrived when it had (F-014).
     SETTLEMENT_UNCONFIRMED = ("SETTLEMENT_UNCONFIRMED", False, 0, True)
+    # A source view did not load completely, so every claim this run makes FROM
+    # THE ABSENCE of one of its rows is unsafe. A break, because unread rows may
+    # carry money nobody has accounted for -- but a break about the PIPELINE, not
+    # about the merchant's cash.
+    #
+    # Why this is a distinct class rather than a bigger quarantine counter: a
+    # count is a diagnostic, and the run already printed one while publishing 21
+    # false MISSING_BANK_CREDIT claims beside it (F-018). An exception enters the
+    # queue, carries value at risk, names an owner, and -- the point -- REPLACES
+    # the absence-based claims it invalidates instead of sitting next to them.
+    SOURCE_VIEW_INCOMPLETE = ("SOURCE_VIEW_INCOMPLETE", True, 0, True)
     # Sec 6 lists 20. Still undeclared, because the generator cannot yet produce
     # them and a taxonomy entry with no data behind it is a claim we cannot back:
     # TDS_194O_VARIANCE (out by persona), FX_VARIANCE (FX cut),

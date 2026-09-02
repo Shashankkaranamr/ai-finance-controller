@@ -19,6 +19,13 @@ from .schemas import BankCreditRow, BookEntryRow, SettlementLineRow, SettlementR
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
+# The four source views, named once so a resolver can ask about a view by the
+# same string the quarantine records against it.
+BOOKS_VIEW = "books.jsonl"
+LINES_VIEW = "settlement_lines.jsonl"
+SETTLEMENTS_VIEW = "settlements.jsonl"
+BANK_VIEW = "bank.jsonl"
+
 
 @dataclass(frozen=True, slots=True)
 class QuarantinedRow:
@@ -45,6 +52,33 @@ class Repository:
     settlements: dict[str, SettlementRow] = field(default_factory=dict)
     bank: dict[str, BankCreditRow] = field(default_factory=dict)
     quarantined: list[QuarantinedRow] = field(default_factory=list)
+
+    # -- completeness ----------------------------------------------------------
+    #
+    # WHY A RESOLVER NEEDS TO ASK THIS
+    # --------------------------------
+    # Quarantine keeps the batch alive, which is right (Sec 8). But it leaves the
+    # resolver reading a view that is silently short of rows, and every claim
+    # made FROM THE ABSENCE of a row is then unsound. `extra="forbid"` means a
+    # renamed column fails every row of a view identically, so the realistic
+    # case is not "one bad row" -- it is the whole view gone, with the resolver
+    # cheerfully concluding that nothing was ever there (F-018).
+
+    def quarantined_by_file(self) -> dict[str, int]:
+        """How many rows each source view lost. Empty dict on a clean run."""
+        counts: dict[str, int] = {}
+        for row in self.quarantined:
+            counts[row.source_file] = counts.get(row.source_file, 0) + 1
+        return counts
+
+    def view_is_complete(self, source_file: str) -> bool:
+        """Did this view load every row it contained?
+
+        Deliberately strict: ONE quarantined row is enough to make an
+        absence-based claim about that view unsafe, because the resolver cannot
+        know whether the row it needed is the row it lost.
+        """
+        return not any(row.source_file == source_file for row in self.quarantined)
 
     # -- derived indexes, built once ------------------------------------------
 
@@ -122,14 +156,14 @@ def load_all(data_dir: Path) -> Repository:
     """Load the four views. Missing files are fatal; bad rows are quarantined."""
     repo = Repository()
 
-    for row in _load_jsonl(data_dir / "books.jsonl", BookEntryRow, repo.quarantined):
+    for row in _load_jsonl(data_dir / BOOKS_VIEW, BookEntryRow, repo.quarantined):
         repo.books[row.order_id] = row
-    for row in _load_jsonl(data_dir / "settlement_lines.jsonl", SettlementLineRow,
+    for row in _load_jsonl(data_dir / LINES_VIEW, SettlementLineRow,
                            repo.quarantined):
         repo.lines[row.entity_id] = row
-    for row in _load_jsonl(data_dir / "settlements.jsonl", SettlementRow, repo.quarantined):
+    for row in _load_jsonl(data_dir / SETTLEMENTS_VIEW, SettlementRow, repo.quarantined):
         repo.settlements[row.id] = row
-    for row in _load_jsonl(data_dir / "bank.jsonl", BankCreditRow, repo.quarantined):
+    for row in _load_jsonl(data_dir / BANK_VIEW, BankCreditRow, repo.quarantined):
         repo.bank[row.bank_ref] = row
 
     return repo

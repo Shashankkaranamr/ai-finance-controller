@@ -395,9 +395,14 @@ def unclosed_settlements(repo) -> tuple[str, ...]:
 def _closure_by_settlement(repo) -> tuple[dict[str, bool], dict[str, int]]:
     """One implementation, so a count and a list can never disagree."""
     members_by_settlement = repo.lines_by_settlement()
+    # `members_by_settlement` is keyed off the LINE view's settlement_id, so it can
+    # name a settlement the SETTLEMENT view never loaded -- which is exactly what
+    # happens when settlements.jsonl quarantines. Indexing blind raised KeyError
+    # and killed the batch, breaking Sec 8's "quarantine rather than abort".
     withheld = {sid: (repo.settlements[sid].created_at, int(_expected_reserve(ms)))
                 for sid, ms in members_by_settlement.items()
-                if int(_expected_reserve(ms)) > 0
+                if sid in repo.settlements
+                and int(_expected_reserve(ms)) > 0
                 and any(_is_plain_debit_adjustment(m) and m.debit == int(_expected_reserve(ms))
                         for m in ms)}
 

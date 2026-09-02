@@ -103,6 +103,13 @@ PLAYBOOK: dict[ExceptionType, tuple[str, str]] = {
         "statement. Resolve the unparsed narrations first; do NOT chase the gateway on "
         "the strength of this record.",
         "finance-ops"),
+    ExceptionType.SOURCE_VIEW_INCOMPLETE: (
+        "A source file did not load completely, so this run cannot say anything about "
+        "rows it never read. Re-pull the file and check for a renamed or dropped column "
+        "against the published schema, then re-run; until then, treat every finding "
+        "that depends on this view as provisional. Do NOT chase the gateway or the bank "
+        "on the strength of this run.",
+        "data-eng"),
     ExceptionType.ON_HOLD_NOT_SETTLED: (
         "Informational: captured but held by the gateway, so no cash moved. Carry as "
         "in-transit receivable; escalate only if the hold outlives the dispute window.",

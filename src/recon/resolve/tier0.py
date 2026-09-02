@@ -31,7 +31,7 @@ from ..domain.graph import (ComponentBasis, ComponentType, Decomposition, EdgeKi
 from ..domain.identities import (RULE_VERSION, bank_tie_out_holds, expected_gst,
                                  gst_on_mdr_holds, rollup)
 from ..generate.narration import parse_utr
-from ..ingest.load import Repository
+from ..ingest.load import BANK_VIEW, LINES_VIEW, SETTLEMENTS_VIEW, Repository
 from ..money import Paise, format_inr
 from ..report.exceptions import SUBJECT_EDGE, SUBJECT_UNIT, ExceptionRecord
 
@@ -47,6 +47,7 @@ def resolve(repo: Repository, audit: AuditLog) -> tuple[list[ReconEdge], list[Ex
     members_by_settlement = repo.lines_by_settlement()
     settlement_by_utr = repo.settlement_by_utr()
 
+    _flag_incomplete_views(repo, exceptions, audit)
     _resolve_settlement_lines(repo, members_by_settlement, edges, exceptions, audit)
     _resolve_line_to_book(repo, edges, exceptions, audit)
     _resolve_refunds(repo, edges, exceptions, audit)
@@ -58,6 +59,58 @@ def resolve(repo: Repository, audit: AuditLog) -> tuple[list[ReconEdge], list[Ex
 
     edges.sort(key=lambda e: e.sort_key())
     return edges, exceptions
+
+
+# --- source completeness, checked BEFORE anything reasons from absence --------
+
+def _flag_incomplete_views(repo, exceptions, audit) -> None:
+    """One exception per source view that lost rows to quarantine.
+
+    WHY THIS RUNS FIRST
+    -------------------
+    Quarantine keeps the batch alive, which Sec 8 requires. What it does not do
+    is tell the resolver to stop trusting the view it just shortened -- and with
+    `extra="forbid"`, a renamed column fails EVERY row of a view identically, so
+    the realistic shape is not one bad row but the entire view gone.
+
+    Measured on 02 Sep (F-018), renaming one column in `bank.jsonl` produced 21
+    MISSING_BANK_CREDIT claims against a statement that had simply never been
+    read, each carrying the sentence "Every credit in the statement was read, so
+    this is a genuine absence." The quarantine count sat in the same run summary,
+    twenty lines above, and gated nothing.
+
+    So the rule is: an absence is only evidence when the view that would have
+    carried the row loaded completely. Every claim in this module that reasons
+    from a row NOT being there checks its view first, and the value of this
+    exception is that it says which view and how much was lost.
+    """
+    lost = repo.quarantined_by_file()
+    for source_file in sorted(lost):
+        rows_lost = lost[source_file]
+        exceptions.append(ExceptionRecord.build(
+            ExceptionType.SOURCE_VIEW_INCOMPLETE, SUBJECT_UNIT, source_file,
+            # Value at risk is genuinely UNKNOWABLE, and zero is the honest
+            # encoding: the money would be in the rows we could not read. Putting
+            # a guess here would be the same error as the claims this replaces.
+            Paise(0),
+            hypothesis=(
+                f"{rows_lost} row(s) in {source_file} failed schema validation and were "
+                "quarantined, so this view is incomplete. Every finding that depends on a "
+                "row being ABSENT from this view has been withheld for this run, because "
+                "the row we needed may be a row we could not read. The amount at risk "
+                "cannot be stated: it is carried by the rows that did not load."),
+            confidence=100,
+            evidence=(
+                Evidence("rows_quarantined",
+                         f"{rows_lost} row(s) rejected at ingest from {source_file}",
+                         (f"source_view:{source_file}",)),
+                Evidence("absence_claims_withheld",
+                         "absence-based exceptions for this view are suppressed; see the "
+                         "audit log for each one withheld and why",
+                         (f"source_view:{source_file}",)),
+            )))
+        audit.record("source_view_incomplete", source_file=source_file,
+                     rows_lost=rows_lost)
 
 
 # --- settlement <-> line items (1:N, membership + set-level rollup) -----------
@@ -95,6 +148,14 @@ def _resolve_settlement_lines(repo, members_by_settlement, edges, exceptions, au
             ))
 
         if not holds:
+            # The rollup sums the members we LOADED. With line items quarantined,
+            # a "mismatch" is at least as likely to be our missing rows as the
+            # gateway's stale total, and the two are indistinguishable from here.
+            if not repo.view_is_complete(LINES_VIEW):
+                audit.record("rollup_mismatch_withheld", settlement=settlement_id,
+                             reported=int(settlement.amount), computed=int(computed),
+                             reason=f"{LINES_VIEW} incomplete")
+                continue
             exceptions.append(ExceptionRecord.build(
                 ExceptionType.ROLLUP_MISMATCH, SUBJECT_UNIT, settlement_id,
                 Paise(abs(int(settlement.amount) - int(computed))),
@@ -236,6 +297,15 @@ def _resolve_refunds(repo, edges, exceptions, audit) -> None:
 
         target = payments_by_payment_id.get(line.payment_id) if line.payment_id else None
         if target is None:
+            # "Does not appear anywhere in this extract" is a claim about the whole
+            # view. If line items were quarantined, the parent capture may be one
+            # of them, and this would report the declared blind spot on a refund
+            # that is perfectly linkable.
+            if not repo.view_is_complete(LINES_VIEW):
+                audit.record("refund_orphaned_withheld", line=entity_id,
+                             payment_id=line.payment_id,
+                             reason=f"{LINES_VIEW} incomplete")
+                continue
             exceptions.append(ExceptionRecord.build(
                 ExceptionType.REFUND_ORPHANED, SUBJECT_UNIT, entity_id,
                 Paise(line.amount),
@@ -434,6 +504,14 @@ def _resolve_bank_credits(repo, members_by_settlement, settlement_by_utr,
 
         settlement = settlement_by_utr.get(utr)
         if settlement is None:
+            # "Matches no known settlement" is only true if we know every
+            # settlement. With settlements quarantined, the one this UTR belongs
+            # to may simply not have loaded -- and calling a merchant's own money
+            # a third party's receipt is the wrong direction to be wrong in.
+            if not repo.view_is_complete(SETTLEMENTS_VIEW):
+                audit.record("unmatched_bank_credit_withheld", bank_credit=bank_ref,
+                             utr=utr, reason=f"{SETTLEMENTS_VIEW} incomplete")
+                continue
             # The extracted UTR is only ever a candidate; it is verified by exact
             # lookup, so a bad extraction cannot survive into a match.
             exceptions.append(ExceptionRecord.build(
@@ -537,7 +615,12 @@ def _flag_missing_bank_credits(repo, matched_settlements, unread, exceptions, au
     had (F-014). The settlement is still flagged either way -- detection is
     unaffected -- but the code, the severity and the suggested action change, and
     those are what a human acts on.
+
+    A statement can be incompletely known in TWO ways, and the first cut of this
+    guard only defended against one. See the comment on the branch below.
     """
+    rows_lost = repo.quarantined_by_file().get(BANK_VIEW, 0)
+
     for settlement_id in sorted(repo.settlements):
         if settlement_id in matched_settlements:
             continue
@@ -580,23 +663,44 @@ def _flag_missing_bank_credits(repo, matched_settlements, unread, exceptions, au
                          status=settlement.status, amount=int(settlement.amount))
             continue
 
-        if unread:
+        # TWO WAYS THE STATEMENT CAN BE INCOMPLETELY KNOWN, AND THEY ARE DIFFERENT
+        #
+        # `unread`      -- the row is IN the statement and we could not parse it.
+        # `rows_lost`   -- the row never loaded at all, because its view failed
+        #                  schema validation and was quarantined.
+        #
+        # D-031 built the first guard and it is measured. The second was missed:
+        # `unread` counts credits that are present, so when the WHOLE view
+        # quarantines there are zero credits, `unread` is 0, and the guard waves
+        # through the strongest claim this system can make on the emptiest
+        # possible evidence (F-018). Both support the same weaker statement.
+        if unread or rows_lost:
+            if rows_lost:
+                why = (f"{rows_lost} row(s) of {BANK_VIEW} failed schema validation and "
+                       "were quarantined, so the statement was never fully loaded")
+                detail = Evidence("bank_view_incomplete",
+                                  f"{rows_lost} row(s) quarantined from {BANK_VIEW}; "
+                                  f"{len(repo.bank)} credit(s) loaded",
+                                  (f"settlement:{settlement_id}",
+                                   f"source_view:{BANK_VIEW}"))
+            else:
+                why = (f"{unread} credit(s) in the statement could not be parsed, and one "
+                       "of those may be this settlement")
+                detail = Evidence("unread_credits_remain",
+                                  f"{unread} of {len(repo.bank)} bank credits yielded no UTR",
+                                  (f"settlement:{settlement_id}",))
             exceptions.append(ExceptionRecord.build(
                 ExceptionType.SETTLEMENT_UNCONFIRMED, SUBJECT_UNIT, settlement_id,
                 Paise(settlement.amount),
                 hypothesis=(
                     f"Settlement {settlement_id} for "
                     f"{format_inr(Paise(settlement.amount))} could not be confirmed: no "
-                    f"credit was linked to it, and {unread} credit(s) in the statement "
-                    "could not be parsed. One of those may be this settlement. This is "
-                    "NOT an assertion that the money is missing."),
+                    f"credit was linked to it, and {why}. This is NOT an assertion that "
+                    "the money is missing."),
                 confidence=100,
-                evidence=(
-                    Evidence("unread_credits_remain",
-                             f"{unread} of {len(repo.bank)} bank credits yielded no UTR",
-                             (f"settlement:{settlement_id}",)),)))
+                evidence=(detail,)))
             audit.record("settlement_unconfirmed", settlement=settlement_id,
-                         unread_credits=unread)
+                         unread_credits=unread, bank_rows_lost=rows_lost)
             continue
         exceptions.append(ExceptionRecord.build(
             ExceptionType.MISSING_BANK_CREDIT, SUBJECT_UNIT, settlement_id,

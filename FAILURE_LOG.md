@@ -478,3 +478,79 @@ gate Tier 0 applied. F-017 is Tier 2 linking against a unit Tier 0 excluded. Sam
 The graph model lets any tier overwrite an edge's status, and nothing carries forward what earlier
 tiers concluded about a *unit*. Two instances is a pattern, not a coincidence, and the third will land
 in whatever tier is built next. See RUN_LOG for the proposed general guard and its cost.
+
+---
+
+### F-018 · 02 Sep 2026 · A renamed column made us tell treasury that all the money was missing
+
+**What broke.** Renaming one column in `bank.jsonl` — `narration` to `description`, the exact failure
+BRIEF Sec 8 line 344 names — made the run publish **21 `MISSING_BANK_CREDIT` breaks** against a
+statement it had never read. Each one carried the sentence:
+
+> *"Every credit in the statement was read, so this is a genuine absence."*
+
+Maximum confidence, maximum value at risk, on 100% of settlements, asserting a completeness check
+that never ran. This was found by tracing the code while planning unrelated work, then reproduced;
+it was not caught by a test, and no test would have caught it, because every fixture loads clean data.
+
+**Measured, dev seed, one column renamed per view:**
+
+| view renamed | rows quarantined | before the fix | after |
+|---|---|---|---|
+| `bank.jsonl` | 23 | `MISSING_BANK_CREDIT` **1 → 21** | 0; **21 `SETTLEMENT_UNCONFIRMED`** |
+| `settlement_lines.jsonl` | 1732 | `ROLLUP_MISMATCH` **2 → 22** | 0 |
+| `settlements.jsonl` | 22 | **`KeyError` — batch aborted** | completes, statement foots |
+| `books.jsonl` | 1549 | `BOOK_AMOUNT_MISMATCH` **65 → 0**, silently | flagged as incomplete |
+
+Two false-positive cascades, one silent false-negative, and a hard crash that violates Sec 8's
+"quarantine bad rows rather than aborting" outright.
+
+**Cause.** `extra="forbid"` is deliberate and correct: a renamed column fails loudly. But it fails
+**every row of that view identically**, so the realistic shape is not one bad row — it is the whole
+view gone. Quarantine then keeps the batch alive without telling the resolver that the view it is
+reading is short of rows, and every claim made *from the absence of a row* silently loses its basis.
+
+The near-miss is the instructive part. `_flag_missing_bank_credits` **already had this guard** — D-031
+and F-014 built it, after we told treasury Rs 33 lakh had not arrived when it had. But it gates on
+`unread`, the count of credits that are *present and unparseable*. When the whole view quarantines
+there are **zero credits, so `unread == 0`**, and the guard waves through the strongest claim the
+system can make on the emptiest possible evidence. The guard defended against an unreadable
+statement and not against an unloadable one, and those are different failures with the same
+consequence.
+
+The crash had a separate cause: `lines_by_settlement()` is keyed off the LINE view's `settlement_id`,
+so it can name a settlement the SETTLEMENT view never loaded. `_closure_by_settlement` indexed
+`repo.settlements[sid]` blind.
+
+**Recovery.**
+1. `Repository.quarantined_by_file()` / `view_is_complete()` — the resolver can now ask whether a view
+   loaded completely. Deliberately strict: one lost row is enough, because the resolver cannot know
+   whether the row it needed is the row it lost.
+2. New `SOURCE_VIEW_INCOMPLETE` exception, raised once per affected view, owned by `data-eng`. It
+   *replaces* the absence-based claims it invalidates rather than sitting beside them. Amount at risk
+   is **0**, which is the honest encoding: the money is in the rows that did not load, so stating a
+   figure would repeat the error being fixed.
+3. Every absence-based claim checks its view first — `MISSING_BANK_CREDIT` routes to
+   `SETTLEMENT_UNCONFIRMED`, and `ROLLUP_MISMATCH`, `REFUND_ORPHANED` and `UNMATCHED_BANK_CREDIT` are
+   withheld, each recorded in the audit log with the reason.
+4. `_closure_by_settlement` skips settlement ids the settlement view never loaded.
+
+**Measured after.** All four views degrade without a false claim and without aborting. **239 tests**
+(28 new, parameterised over both seeds and all four views). `metrics.json` **byte-identical on both
+seeds** before and after the change — on a clean run the guard is inert, which is what makes it a
+guard rather than a behaviour change.
+
+**Standing consequence.** This is the third instance in two days of the same shape as F-016 and F-017,
+approached from a new direction. Those two were a tier contradicting a lower tier. This one is the
+resolver contradicting the *ingest layer*, which had already recorded everything needed to prevent it:
+
+> **A count is a diagnostic, not a control. If a fact would invalidate a published claim, it must
+> gate that claim in code — printing it in the run summary is not a safeguard, it is a footnote.**
+
+The quarantine count was on screen, twenty lines above the false breaks, on every single run.
+
+**What this does not fix.** The batch now degrades honestly, but it still produces nothing useful from
+a drifted view, and nothing here recovers the rows. Recovering them needs a mapping from unrecognised
+column names to the schema, which no rule can supply for a name it has not seen. That is the argument
+for the next increment, and it is the first time in this project that the LLM has had a defensible
+job outside narration parsing.
