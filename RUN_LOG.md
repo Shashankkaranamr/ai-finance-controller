@@ -1204,3 +1204,89 @@ went *down* on 02 Sep, what queue precision absorbs, and why the headline is nev
 | Tests | **211 passed** | — |
 
 No metric moved as a result of items 3 or 4. Two were added; none was changed.
+
+---
+
+## PRE-REGISTERED PREDICTION — second-gateway credits on eval · 02 Sep 2026
+
+**Written before any code was touched.** The hypothesis under test: *does the LLM's ceiling rise if
+the held-out seed contains same-day, amount-proximate credits from a second gateway?* This is a
+timeboxed experiment, not a feature commitment, and the prediction is recorded first so the result
+cannot drift toward the interesting answer.
+
+### The prediction: NO. The ceiling does not rise. I expect it to stay at 1.
+
+Not a hedge — this follows from the code rather than from intuition, so it is sharply falsifiable.
+
+**The mechanism, traced through `tier2.resolve` rather than assumed.** Tier 2 requires the amount to
+match **to the paise**, then filters by the posting window, then requires uniqueness both ways:
+
+- For a **second-gateway credit** of amount B: `candidates` are settlements whose amount is *exactly*
+  B. An amount-*proximate* credit (B ≈ A, B ≠ A) matches nothing, so it is skipped without even
+  counting as ambiguous. It cannot produce a wrong link.
+- For a **gateway-1 settlement** of amount A: `rival_credits` are credits of amount *exactly* A inside
+  its window. A proximate credit is not a rival, so it cannot break an existing link either.
+
+**Exactness is immune to proximity.** Same-day, near-miss credits therefore change nothing about
+which settlements Tier 2 places, which means the LLM is handed no work it could not already have had.
+
+The only way the ceiling rises is an **exact-to-the-paise** amount collision inside a settlement's
+posting window, which would refuse that settlement's link as a tie and leave the UTR as the only route
+to it. By chance that is essentially impossible: 22 of 22 settlement amounts are distinct on this seed
+and the two closest are **Rs 171.98** apart, on values around Rs 1.5 lakh. To get a collision I would
+have to set a second-gateway amount equal to a gateway-1 settlement's amount **deliberately** — and
+that is manufacturing the ambiguity, not modelling a merchant. I will not do it, and if the result
+comes back showing a risen ceiling, the first thing to check is whether the generator accidentally
+did.
+
+### What I predict DOES change
+
+| | prediction |
+|---|---|
+| Oracle ceiling (recoverable credits a perfect extractor adds) | **unchanged at 1** |
+| Live model accepted links | **0**, and any acceptance is a defect to investigate, not a win |
+| Adjudicator calls | **rises** from 3 to roughly 3 + the number injected, since held-out narrations do not parse |
+| `blocked_unverifiable` | rises by about the same amount — every second-gateway UTR is real and resolves to no settlement of ours |
+| Explanation rate | **falls**, mechanically: the denominator grows, the numerator does not. ~18/23 becomes ~18/29 if six are injected |
+| `UNMATCHED_BANK_CREDIT` raised | rises by the number injected; all real, so detection recall holds |
+| False clear, in remit | **stays 0.00%** |
+| Linkage precision | **stays 100.00%** |
+
+The explanation-rate fall is the honest arithmetic of a real merchant account: a controller must
+account for every credit that lands, including the ones another aggregator sent. It will look like a
+regression and it is not one.
+
+### Two costs I want on the record before starting, not after
+
+**1. This makes `eval` structurally different from `dev`, not just a different draw.** Until now both
+seeds came from one generator with one config, which is what makes eval a clean held-out sample. A
+knob set only on eval means any dev/eval difference is confounded by the knob. For a timeboxed
+experiment that is acceptable if stated; it would not be acceptable as a permanent asymmetry, and if
+this ships the same shape has to reach dev too.
+
+**2. D-016 cut multi-gateway with reasoning that has not gone away.** It was cut because *building
+difficulty in order to give the LLM a job* is the Sec 9 anti-pattern. What makes this experiment
+legitimate is that the prediction is registered first and says the ceiling will NOT move — so the
+finding is publishable either way. But if the ceiling does rise, the honest sentence is **"it rises
+because we added the difficulty that raises it"**, and that must appear next to the number rather than
+be left for a reviewer to work out.
+
+### Confidence
+
+High on the Tier 2 reasoning, because it is read off the two uniqueness checks rather than inferred.
+Lower on the exact call counts, which depend on how many credits I inject and which narration families
+they draw. The falsifiable core is the first row of the table: **oracle ceiling stays at 1.**
+
+### Estimate for the smallest version: ~2h 15m
+
+Under the 3-hour ceiling, so proceeding. Second-gateway credits reuse `ExtraBankCredit`, which already
+carries a bank_ref, value date, amount, UTR, narration override and a truth anomaly — most of the
+structure exists.
+
+| | |
+|---|---|
+| Config knob (default 0, so dev is untouched) + injector | 45 min |
+| Truth and derive wiring — largely free via `ExtraBankCredit` | 15 min |
+| Tests: dates collide, amounts never collide exactly, dev unchanged, determinism | 45 min |
+| Full invariant suite, determinism, false clear, both seeds | 20 min |
+| RUN_LOG result entry | 30 min |
