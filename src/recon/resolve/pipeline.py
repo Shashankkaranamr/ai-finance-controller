@@ -22,7 +22,7 @@ from ..llm.client import Adjudicator, LLMStats, NullAdjudicator, ResponseCache
 from ..money import Paise
 from ..report import exceptions as queue
 from ..report import metrics as report_metrics
-from . import tier0, tier1, tier2, tier3
+from . import schema_repair, tier0, tier1, tier2, tier3
 
 SOURCE_FILES = ("books.jsonl", "settlement_lines.jsonl", "settlements.jsonl", "bank.jsonl")
 
@@ -76,16 +76,26 @@ def run(data_dir: Path, out_dir: Path,
     for bad in repo.quarantined:
         audit.record("row_quarantined", **bad.to_json())
 
-    edges, exception_records = tier0.resolve(repo, audit)
-
-    # Built before Tier 3 so the counters it increments are the ones reported.
-    # With no adjudicator configured this stays a degraded run and Tier 3 is a
-    # no-op -- which is why every run so far has already exercised that path.
+    # Built before ANY resolver, because schema repair runs first and increments
+    # these counters. With no adjudicator configured this stays a degraded run and
+    # both LLM stages are no-ops -- which is why every rules-only run has already
+    # exercised that path.
     llm = LLMStats(
         available=adjudicator.available,
         degraded=not adjudicator.available,
         degraded_reason=getattr(adjudicator, "reason", "") if not adjudicator.available else "",
     )
+    cache = ResponseCache()
+
+    # SCHEMA REPAIR RUNS BEFORE TIER 0, and the order is load-bearing. Tier 0's
+    # completeness gate reads the quarantine (F-018), so a view recovered here is
+    # one Tier 0 reasons from normally, and a view left unrecovered still
+    # correctly suppresses every absence-based claim. Putting this after Tier 0
+    # would mean repairing data the resolver had already drawn conclusions from.
+    if max_tier >= 3:
+        repo = schema_repair.repair(data_dir, repo, adjudicator, cache, llm, audit)
+
+    edges, exception_records = tier0.resolve(repo, audit)
 
     # Tier 1 takes Tier 0's MATCHED bank edges and types what remains against the
     # contracted rate card. It returns new edges rather than mutating: the audit
@@ -102,7 +112,6 @@ def run(data_dir: Path, out_dir: Path,
     # creates still has to be explained by the arithmetic afterwards. Running it
     # after Tier 1 would leave LLM-linked credits permanently unexplained, and
     # letting it run instead of Tier 1 would be invariant 8 violated outright.
-    cache = ResponseCache()
     if max_tier >= 3:
         edges, exception_records = tier3.resolve(
             repo, edges, exception_records, adjudicator, cache, llm, audit)

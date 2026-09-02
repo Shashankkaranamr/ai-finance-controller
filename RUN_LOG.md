@@ -1395,3 +1395,94 @@ untouched (23 rows, zero `PAYSWIFT`), and the entire test suite constructs `GenC
 
 Elapsed: under the 2h 15m estimate, because the generator work was already done when the result
 was measured.
+
+---
+
+## Schema repair — the boundary increment · 02 Sep 2026
+
+Two commits, measured separately, because one is a defect fix that stands alone and the other is a
+new LLM job that only makes sense once the fix has landed.
+
+### Part 1 — the absence-claim defect (F-018)
+
+Found by tracing code while planning unrelated work, then reproduced. No test would have caught it:
+every fixture loads clean data.
+
+| view, one column renamed | rows quarantined | before | after |
+|---|---|---|---|
+| `bank.jsonl` | 23 | `MISSING_BANK_CREDIT` **1 → 21** | 0; **21 `SETTLEMENT_UNCONFIRMED`** |
+| `settlement_lines.jsonl` | 1732 | `ROLLUP_MISMATCH` **2 → 22** | 0 |
+| `settlements.jsonl` | 22 | **`KeyError`, batch aborted** | completes, statement foots |
+| `books.jsonl` | 1549 | `BOOK_AMOUNT_MISMATCH` **65 → 0**, silently | flagged incomplete |
+
+The near-miss is the part worth keeping: `_flag_missing_bank_credits` **already had this guard**, built
+by D-031 after F-014. It gates on `unread` — credits present but unparseable. When the whole view
+quarantines there are zero credits, `unread == 0`, and the guard passes the strongest claim the system
+can make on the emptiest possible evidence.
+
+### Part 2 — `map_schema`, and what it is worth
+
+**The ablation. Same drifted input, three adjudicators.** `settlement_lines.jsonl` with `entity_id`
+renamed:
+
+| | rules only | correct mapping | fee/tax swapped |
+|---|---|---|---|
+| **dev** rows quarantined | 1732 | **0** | 1732 |
+| explanation rate | 0/23 | **17/23** | 0/23 |
+| false clear, in remit | **190/195** | **0/195** | 190/195 |
+| `blocked_bad_mapping` | 0 | 0 | **1** |
+| **eval** rows quarantined | 1789 | **0** | 1789 |
+| explanation rate | 0/23 | **18/23** | 0/23 |
+| false clear, in remit | **180/187** | **0/187** | 180/187 |
+| `blocked_bad_mapping` | 0 | 0 | **1** |
+| statement foots | YES | YES | YES |
+
+**A verified repair restores the run to exactly what it would have been.** 17/23 and false clear 0/195
+on dev, 18/23 and 0/187 on eval — byte-for-byte the clean-run figures. Not "close to"; the same.
+
+**The number that reframes the project's headline.** On a drifted view, rules-only false clear in remit
+is **190/195 on dev and 180/187 on eval.** Invariant 10 says that number must be zero, and it has been
+zero on every run for eight days. It is zero **conditional on the inputs loading**, and nothing until
+now made that condition visible. The guarantee was never as unconditional as the README implies, and
+schema repair is what makes it robust rather than merely true-so-far.
+
+### Two things the build got wrong on the way, both worth keeping
+
+**1. The obvious verifier was the wrong verifier.** Gate 3 was first written as `gst_on_mdr_holds` —
+tax is 18% of the MDR base. Measuring it immediately said no: it fails on **17 of 890** fee-bearing dev
+rows and **13 of 885** on eval, because `GST_ON_MDR_MISMATCH` is an anomaly the generator injects on
+purpose. Gating on it **rejects a correct mapping because the data contains the defect the system
+exists to find** — failing precisely on the merchants who need it most.
+
+The gate now asks a different question: not "was the right rate charged", which is Tier 1's job and may
+legitimately be no, but **"is this column still the thing it claims to be"**. Four containments —
+`fee <= amount`, `tax <= fee`, `amount > 0`, never both `credit` and `debit` — each holding on **100%
+of rows on both seeds**, while a single fee/tax swap breaks containment on **all 890 and all 885**
+fee-bearing rows at once. Exact, total, and blind to whether the money itself was right.
+
+**2. The quarantine record could not be repaired from.** `QuarantinedRow.raw` is truncated to 200
+characters because it is an audit-log excerpt. A settlement line is several times that, so repairing
+from it would have silently worked for the bank view and been impossible for the two largest ones.
+Repair re-reads the source file by line number instead.
+
+### Regression and determinism
+
+`metrics.json` is **byte-identical on both seeds** against a baseline captured *before Part 1* — both
+parts are complete no-ops on clean input. Same seed twice is byte-identical. **258 tests** (211 → 239
+→ 258), every new case parameterised over `dev` and `eval` and working on tmp copies.
+
+`schema_repair.py` uses `Path.joinpath` rather than `/`: pathlib overloads the operator and it parses
+as `ast.Div`, which the float scan bans. One call does not justify adding a fifth module to that
+exclusion list — new modules stay strict by default, which is the point of the list being a list
+(D-006, F-003).
+
+### What is NOT claimed
+
+**There is still no API key (D-022).** Every number above comes from test doubles: a truthful mapper, a
+hostile one, and three structurally invalid ones. That measures **the fence**, which is what the fence
+is for, and it measures the ablation's shape. It says **nothing** about whether a real model proposes
+correct mappings, and that number is claimed nowhere. With a key, one run produces it.
+
+The honest summary: *we do not know how often the model is right, and we have proven that it does not
+matter for safety — a wrong mapping cannot reach the ledger.* That is the same claim Tier 3 makes, on a
+verifier that is strictly stronger.

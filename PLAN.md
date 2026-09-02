@@ -1046,3 +1046,37 @@ a genuine pair half is now asserted by
 moment real queue noise appears wearing the artifact's clothes, instead of the README quietly becoming
 false.
 **Supersedes:** —
+
+### D-036 · Schema repair · 2026-09-02 · D-016 is NARROWED, not reversed: the core stays closed, the boundary opens
+**Decision:** `map_schema` ships as a second fenced LLM job, running before Tier 0. D-016's cut of
+every other proposed LLM job — `rank_candidates` above all — **stands unchanged**.
+**Why:** D-016 asked "where can the LLM help the matcher?" and correctly answered "nowhere": Tier 1
+closes the decomposition, and Tier 2's exact-to-the-paise uniqueness leaves nothing to rank. That
+reasoning is about the **middle** of the system and nothing here touches it. The question never asked
+was *where does the system meet a document it has not seen before*, and there determinism has no move
+at all: **you cannot write a regex for a column name you have not seen.** The alternatives are an
+engineer shipping a mapping per format change or the system proposing one and proving it. There is no
+deterministic third option, which is exactly what was absent from every job D-016 declined.
+
+The admission test, generalised from Tier 3's fence and now the standing rule for any future job:
+**what independently verifies the proposal?** A UTR resolves or it does not. A mapping must survive
+four exact gates, and the strongest of them — containment — catches the case type-checking cannot see:
+two same-typed fields swapped, which re-validates perfectly and is arithmetically nonsense.
+
+Measured, and this is why it is not a speculative feature: on a drifted view, rules-only in-remit false
+clear is **190/195 on dev and 180/187 on eval**. A verified repair returns the run to **exactly** its
+clean figures — 17/23 and 0/195, 18/23 and 0/187. Invariant 10's zero is real, and it is
+**conditional on the inputs loading**; nothing before this made that condition visible.
+**What it rules out:** Reading D-016 as "the LLM has no place here" — it never said that, and the
+repo has shipped a live LLM tier since Increment 3. It also rules out the reverse over-reading: this
+does **not** reopen `rank_candidates`, `classify_residual`, or any job inside the matcher, none of
+which has an independent verifier. A job with no verifier stays cut, and the fact that this one has
+the strongest verifier in the codebase is the entire argument for it.
+
+Also ruled out: gating a repair on `gst_on_mdr_holds`. It fails on 17/890 dev and 13/885 eval rows
+because GST mismatch is an injected anomaly, so it would reject a **correct** mapping on data
+containing the defect the system exists to find — failing on the merchants who need it most. The gate
+asks whether a column is still what it claims to be, never whether the money was right.
+**Supersedes:** Narrows D-016 (which stands for every job inside the matcher). Does not affect D-022:
+with no API key, the fence and the ablation are measured and **real-model mapping accuracy is claimed
+nowhere**.

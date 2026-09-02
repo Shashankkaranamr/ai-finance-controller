@@ -124,6 +124,13 @@ class LLMStats:
     #       still right, but it is not a model error and must not be counted as one.
     blocked_hallucination: int = 0
     blocked_unverifiable: int = 0
+    #   blocked_bad_mapping   -- a proposed column mapping failed one of schema
+    #       repair's four gates. A third counter for the same reason there are
+    #       two above (D-025): it is a different event with a different meaning.
+    #       A hallucinated UTR is a model reading a document wrong; a rejected
+    #       mapping is a model reasoning about a SCHEMA wrong, and the two say
+    #       different things about where a model can be trusted.
+    blocked_bad_mapping: int = 0
     degraded: bool = True
     degraded_reason: str = ""
 
@@ -135,6 +142,7 @@ class LLMStats:
             "cache_hits": self.cache_hits,
             "blocked_hallucination": self.blocked_hallucination,
             "blocked_unverifiable": self.blocked_unverifiable,
+            "blocked_bad_mapping": self.blocked_bad_mapping,
             "degraded": self.degraded,
             "degraded_reason": self.degraded_reason,
         }
