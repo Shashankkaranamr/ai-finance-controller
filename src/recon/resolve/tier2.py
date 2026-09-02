@@ -50,6 +50,7 @@ from ..domain.rates import RULE_VERSION
 from ..ingest.load import Repository
 from ..money import Paise, format_inr
 from ..report.exceptions import ExceptionRecord
+from .tier0 import SETTLEMENT_PROCESSED
 
 
 def resolve(repo: Repository, edges: list[ReconEdge],
@@ -66,8 +67,21 @@ def resolve(repo: Repository, edges: list[ReconEdge],
     linked_credits = {e.src_uid for e in edges if e.kind is EdgeKind.BANK_TO_SETTLEMENT}
 
     open_credits = [repo.bank[r] for r in sorted(repo.bank) if r not in linked_credits]
+    # A SETTLEMENT THE REPORT SAYS NEVER PAID OUT IS NOT A CANDIDATE.
+    #
+    # Tier 0 reads `status` and reports a non-`processed` settlement as
+    # SETTLEMENT_FAILED -- the money never left. Corroborating a credit against it
+    # anyway makes two tiers contradict each other inside one run, and it is how a
+    # duplicate posting of a *cancelled* transfer got linked and marked explained
+    # on the held-out seed (F-017).
+    #
+    # This is not a synthetic-data patch. A real statement can easily carry an
+    # unrelated credit matching a failed settlement's amount and date; two fields
+    # agreeing is corroboration, and there is nothing to corroborate when the
+    # gateway has already said the transfer did not complete.
     open_settlements = [repo.settlements[s] for s in sorted(repo.settlements)
-                        if s not in linked_settlements]
+                        if s not in linked_settlements
+                        and repo.settlements[s].status == SETTLEMENT_PROCESSED]
     if not open_credits or not open_settlements:
         return edges, exceptions
 

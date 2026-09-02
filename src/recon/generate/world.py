@@ -91,6 +91,14 @@ class AnomalyRates:
     missing_bank_credit_count: int = 1
     unmatched_bank_credit_count: int = 2
     duplicate_utr_count: int = 1
+    # Settlements whose REPORTED total was struck before a line item posted, so
+    # the settlement entity's `amount` disagrees with its own line items. A count,
+    # not a rate: it is a property of when the extract was taken, not of volume.
+    stale_settlement_total_count: int = 2
+    # Settlements the gateway reported as FAILED: created, transfer attempted,
+    # rejected by the bank, no credit. Drawn from the tail of the window so that
+    # "not yet re-settled" is the honest reading rather than money that vanished.
+    failed_settlement_count: int = 1
     # Cycles settled instantly (setlod_*) rather than on schedule. A COUNT, not
     # a rate: at ~9% over 22 cycles a seed can legitimately draw zero, and the
     # eval seed did -- leaving INSTANT_SETTLEMENT_FEE absent from the deduction
@@ -192,6 +200,15 @@ class Settlement:
     amount: Paise = Paise(0)          # filled once its line items exist
     has_bank_credit: bool = True
     anomaly: ExceptionType | None = None
+    # What the SETTLEMENT ENTITY endpoint reports, when that differs from the
+    # money that actually moved. None means the report agrees with the world.
+    # Kept separate from `amount` so truth stays the truth: the bank credit and
+    # the line items follow `amount`, and only the derived entity view is stale.
+    reported_amount: Paise | None = None
+    # What the settlement entity's `status` field says. Real settlements are
+    # `created`, `processed` or `failed`; a failed transfer produces no credit and
+    # says so, which is a different fact from a credit we simply cannot find.
+    status: str = "processed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +318,8 @@ def build_world(config: GenConfig) -> World:
     _build_reserve(world)
     _close_settlements(world)
     _inject_bank_anomalies(world)
+    _inject_failed_settlements(world)
+    _inject_stale_totals(world)
     return world
 
 
@@ -810,6 +829,111 @@ def _inject_bank_anomalies(world: World) -> None:
             utr=source.utr,
             anomaly=ExceptionType.DUPLICATE_UTR,
         ))
+
+
+def _inject_failed_settlements(world: World) -> None:
+    """A settlement the gateway attempted and the bank rejected.
+
+    WHY THIS IS A REALISM FIX AND NOT A NEW DIFFICULTY
+    --------------------------------------------------
+    `derive_settlement_entities` hard-coded `status: "processed"` on every row.
+    The field was loaded, printed in evidence, and never decided on -- so the one
+    fact a real settlement report gives you about why a credit is absent was
+    thrown away. ARCHITECTURE.md Sec 4 named it: "all `status: processed`, no
+    failed or reversed settlements".
+
+    A failed settlement and a missing credit look IDENTICAL in the bank statement
+    -- in both cases there is simply no row. They are opposite findings. One says
+    the gateway told us it failed, and the analyst chases beneficiary details. The
+    other says the money left and never landed, and the analyst chases the bank.
+    Reporting the first as the second is the same error as F-014, one step along:
+    asserting more than the evidence supports.
+
+    Drawn from the LAST QUARTER of the window on purpose. A settlement that fails
+    early is re-issued inside the extract, and modelling the re-issue means the
+    same underlying sales appear under two settlement ids -- a real shape, but a
+    different and much larger change than the gap named. Failing late makes "not
+    yet re-settled" the honest reading of the same data.
+    """
+    config = world.config
+    count = config.anomalies.failed_settlement_count
+    if count <= 0:
+        return
+    rng = _stream(config.seed, "failed_settlements")
+
+    # A settlement whose transfer FAILED cannot also have been double-posted by
+    # the bank: the duplicate exists because the original landed. Injecting both
+    # onto one settlement builds a world that cannot exist, and the resolver then
+    # sees the duplicate as the only credit carrying that amount and date (F-017).
+    #
+    # The duplicate-UTR anomaly attaches to the extra CREDIT, not to the settlement
+    # it was copied from, so `anomaly is None` does not see it. Match on the UTR,
+    # which is the link the copy was made through.
+    sourced = {extra.utr for extra in world.extra_bank_credits}
+
+    cutoff = (config.n_cycles * 3) // 4
+    eligible = [s for s in world.settlements
+                if s.anomaly is None and s.has_bank_credit and s.cycle_index >= cutoff
+                and s.utr not in sourced]
+    for settlement in rng.sample(eligible, min(count, len(eligible))):
+        index = world.settlements.index(settlement)
+        world.settlements[index] = replace(
+            settlement,
+            status="failed",
+            has_bank_credit=False,
+            anomaly=ExceptionType.SETTLEMENT_FAILED)
+
+
+def _inject_stale_totals(world: World) -> None:
+    """A settlement entity whose reported `amount` predates one of its own lines.
+
+    THE IDENTITY THIS EXISTS TO MAKE FALSIFIABLE
+    --------------------------------------------
+    Sec 3.2's rollup is `settlement.amount == sum(credit) - sum(debit)`. Until
+    now it could not fail: `_close_settlements` computes `amount` from the line
+    items, `derive_settlement_entities` reports that number, and the resolver
+    recomputes the same sum. Two of the three Sec 3.2 identities were therefore
+    decoration -- checked, always true, and proving nothing. That is D-003's
+    failure mode ("every identity must have its two sides sourced independently")
+    reappearing one layer up, and ARCHITECTURE.md Sec 4 named fixing it as the
+    highest-value remaining generator work.
+
+    THE MECHANISM, AND WHY THIS ONE
+    -------------------------------
+    The settlement entity and the recon line items come from different endpoints
+    (D-003), so they are read at different instants. An extract taken while a
+    line is still posting gets a total struck BEFORE that line -- the ordinary
+    cause of a real rollup break, and the one Tier 0's hypothesis text has been
+    offering since Increment 0 without any data able to trigger it.
+
+    Only the DERIVED ENTITY VIEW goes stale. The money that moved -- the line
+    items and the bank credit -- follows `amount`, because nothing about a
+    reporting lag changes what the bank paid. So the reconciler sees the report
+    disagreeing with itself while the cash is fine, which is exactly the shape a
+    controller has to diagnose.
+    """
+    config = world.config
+    count = config.anomalies.stale_settlement_total_count
+    if count <= 0:
+        return
+    rng = _stream(config.seed, "stale_totals")
+
+    eligible = [s for s in world.settlements if s.anomaly is None]
+    for settlement in rng.sample(eligible, min(count, len(eligible))):
+        lines = world.lines_of(settlement.settlement_id)
+        # The line that posted after the total was struck. Latest by created_on,
+        # tie-broken on line_id so the choice is deterministic and independent of
+        # list order. A zero-net line would leave the total unchanged and inject
+        # nothing, so those cannot be the late one.
+        late = max((line for line in lines if line.net != 0),
+                   key=lambda line: (line.created_on, line.line_id), default=None)
+        if late is None:
+            continue
+        index = world.settlements.index(settlement)
+        world.settlements[index] = replace(
+            settlement,
+            reported_amount=Paise(int(settlement.amount) - late.net),
+            anomaly=ExceptionType.ROLLUP_MISMATCH)
 
 
 # --- ground truth -------------------------------------------------------------

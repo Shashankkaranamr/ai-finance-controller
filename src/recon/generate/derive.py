@@ -116,8 +116,17 @@ def derive_settlement_entities(world: World) -> list[dict]:
         rows.append({
             "id": settlement.settlement_id,
             "entity": "settlement",
-            "amount": int(settlement.amount),
-            "status": "processed",
+            # `reported_amount` is what THIS endpoint returned, which is not always
+            # what moved: an extract taken mid-posting carries a total struck before
+            # its last line item. Reporting the true figure here would keep the Sec
+            # 3.2 rollup true by construction and the identity would prove nothing.
+            "amount": int(settlement.reported_amount
+                          if settlement.reported_amount is not None
+                          else settlement.amount),
+            # Not always "processed". A failed transfer is reported as such, and
+            # it is the only thing in the extract that tells a missing credit
+            # ("the money never landed") apart from a failed one ("it never left").
+            "status": settlement.status,
             "fees": sum(int(line.fee) for line in lines),
             "tax": sum(int(line.tax) for line in lines),
             "utr": settlement.utr,

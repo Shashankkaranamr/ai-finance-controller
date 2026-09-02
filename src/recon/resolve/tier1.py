@@ -48,6 +48,7 @@ from ..audit.log import AuditLog
 from ..domain.graph import (ComponentBasis, ComponentType, Decomposition, EdgeKind,
                             EdgeStatus, Evidence, ExceptionType, ReconEdge, Tier,
                             VarianceComponent)
+from ..domain.identities import bank_tie_out_holds
 from ..domain.rates import (CHARGEBACK_FEE_PAISE, INSTANT_SETTLEMENT_FEE_BPS,
                             RESERVE_HOLD_DAYS, ROLLING_RESERVE_BPS, RULE_VERSION,
                             mdr_rate_bps)
@@ -288,13 +289,37 @@ def _decompose(repo, edge: ReconEdge, members, withheld, exceptions, audit) -> R
         actual=edge.decomposition.actual,
         components=tuple(components),
     )
-    explained = decomposition.is_fully_explained
+
+    # TIER 1 INHERITS TIER 0'S GATE. IT MAY NOT WEAKEN IT.
+    #
+    # Tier 0 marks a bank edge explained only when the decomposition closes AND
+    # the credit ties out to the settlement's own reported total. Tier 1 used to
+    # recompute this as `decomposition.is_fully_explained` alone and then
+    # overwrite the status, silently dropping the second conjunct -- so a
+    # settlement whose report contradicted both its line items and the bank was
+    # declared fully explained and auto-posted to the ledger.
+    #
+    # It survived from Increment 2 to here because no generated data could make
+    # the tie-out fail: the entity view reported a total computed from the same
+    # line items, and the bank credit was copied from it. The identity was
+    # decoration, and decoration was hiding this (F-016). A tier may add
+    # explanation; it may never quietly retire a check a lower tier applied.
+    ties_out = bank_tie_out_holds(decomposition.actual, Paise(settlement.amount))
+    closed = decomposition.is_fully_explained
+    explained = closed and ties_out
 
     evidence.append(Evidence(
         "tier1_decomposition",
         f"{len(components)} typed components; residual "
-        f"{int(decomposition.residual)} [{'closed' if explained else 'OPEN'}]",
+        f"{int(decomposition.residual)} [{'closed' if closed else 'OPEN'}]",
         (f"settlement:{settlement.id}",)))
+    if not ties_out:
+        evidence.append(Evidence(
+            "bank_tie_out",
+            f"bank credit {int(decomposition.actual)} vs settlement.amount "
+            f"{int(settlement.amount)} [DIFFERS] -- the money is typed, but the "
+            "report disagrees with itself, so nothing posts",
+            (f"settlement:{settlement.id}",)))
 
     upgraded = edge.resolved_at(
         Tier.T1_ARITHMETIC,
@@ -306,7 +331,13 @@ def _decompose(repo, edge: ReconEdge, members, withheld, exceptions, audit) -> R
     audit.record_edge("tier1_decomposed", upgraded,
                       residual=int(decomposition.residual), components=len(components))
 
-    if not explained:
+    # Only a genuinely OPEN residual is an unexplained variance. A closed
+    # decomposition that fails the tie-out is the same event Tier 0 already queued
+    # as ROLLUP_MISMATCH against the settlement unit, and raising a second record
+    # here -- for `Rs 0.00` of residual, which is the text this would print --
+    # would double-count one event and read as nonsense to the analyst. Same
+    # supersession rule as D-020: the queue states the final position once.
+    if not closed:
         exceptions.append(ExceptionRecord.build(
             ExceptionType.AMOUNT_VARIANCE_UNEXPLAINED, SUBJECT_EDGE, upgraded.ref,
             Paise(abs(int(decomposition.residual))),
@@ -345,6 +376,24 @@ def closure_report(repo) -> tuple[int, int, dict[str, int]]:
 
     Returns (closed, total, money explained by ComponentBasis).
     """
+    by_settlement, by_basis = _closure_by_settlement(repo)
+    return sum(by_settlement.values()), len(by_settlement), by_basis
+
+
+def unclosed_settlements(repo) -> tuple[str, ...]:
+    """Which settlements `closure_report` could not close, by id.
+
+    The count alone stopped being enough once a settlement's REPORTED total could
+    be wrong (F-016): a gap that fails to close because the report contradicts
+    itself is a corrupted input, not an arithmetic failure, and the two must be
+    told apart by name rather than by arithmetic on totals.
+    """
+    by_settlement, _ = _closure_by_settlement(repo)
+    return tuple(sorted(sid for sid, closed in by_settlement.items() if not closed))
+
+
+def _closure_by_settlement(repo) -> tuple[dict[str, bool], dict[str, int]]:
+    """One implementation, so a count and a list can never disagree."""
     members_by_settlement = repo.lines_by_settlement()
     withheld = {sid: (repo.settlements[sid].created_at, int(_expected_reserve(ms)))
                 for sid, ms in members_by_settlement.items()
@@ -352,7 +401,7 @@ def closure_report(repo) -> tuple[int, int, dict[str, int]]:
                 and any(_is_plain_debit_adjustment(m) and m.debit == int(_expected_reserve(ms))
                         for m in ms)}
 
-    closed = 0
+    closed: dict[str, bool] = {}
     by_basis: dict[str, int] = {}
     settlement_ids = sorted(repo.settlements)
     for settlement_id in settlement_ids:
@@ -363,13 +412,13 @@ def closure_report(repo) -> tuple[int, int, dict[str, int]]:
         gross = sum(m.amount for m in members if m.is_settled_payment)
         reported_fees = sum(m.fee for m in members if m.is_settled_payment)
         gap = gross - int(settlement.amount) - reported_fees
-        if gap - sum(int(c.amount) for c in typed.components) == 0:
-            closed += 1
+        closed[settlement_id] = (
+            gap - sum(int(c.amount) for c in typed.components) == 0)
         for component in typed.components:
             by_basis[component.basis.value] = (
                 by_basis.get(component.basis.value, 0) + abs(int(component.amount)))
 
-    return closed, len(settlement_ids), by_basis
+    return closed, by_basis
 
 
 # --- (b) the contracted fee check ---------------------------------------------

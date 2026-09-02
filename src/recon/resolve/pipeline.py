@@ -108,9 +108,25 @@ def run(data_dir: Path, out_dir: Path,
                      subject=record.subject_id, by_tier=3)
     exception_records = [r for r in exception_records if r not in still_missing]
 
-    explained_refs = {e.ref for e in edges if e.status is EdgeStatus.EXPLAINED}
+    # SUPERSEDE ON WHAT THE RECORD ACTUALLY CLAIMS, NOT ON THE EDGE'S STATUS.
+    #
+    # The only edge-subject exception is AMOUNT_VARIANCE_UNEXPLAINED, and what it
+    # asserts is "money in this gap is untyped". The right question is therefore
+    # whether the residual closed -- not whether the edge reached EXPLAINED.
+    #
+    # Those were the same thing until a stale settlement total could exist. Now an
+    # edge can close its residual completely and still be withheld from the ledger
+    # because the report contradicts itself (F-016), and keying on EXPLAINED left
+    # Tier 0's intermediate record standing on exactly those edges -- telling an
+    # analyst that a reserve or refund "needs the contracted rate card to name"
+    # when Tier 1 had already named every component. That is the phantom break
+    # D-020 exists to prevent, reappearing through a door the fix did not cover.
+    # ROLLUP_MISMATCH is the one true statement about those settlements and it
+    # stays; this record does not.
+    closed_refs = {e.ref for e in edges
+                   if e.decomposition is not None and int(e.decomposition.residual) == 0}
     superseded = [r for r in exception_records
-                  if r.subject_kind == queue.SUBJECT_EDGE and r.subject_id in explained_refs]
+                  if r.subject_kind == queue.SUBJECT_EDGE and r.subject_id in closed_refs]
     for record in superseded:
         audit.record("exception_superseded", code=record.code,
                      subject=record.subject_id, by_tier=1)

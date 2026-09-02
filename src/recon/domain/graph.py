@@ -163,6 +163,12 @@ class ExceptionType(Enum):
     # which is the same failure reached from the side we actually model.
     CHARGEBACK_UNLINKED = ("CHARGEBACK_UNLINKED", True, 0, True)
     DUPLICATE_UTR = ("DUPLICATE_UTR", True, 0, True)
+    # The gateway reported the transfer FAILED. Money that should be in the bank
+    # is not, so this is a break -- but it is a different claim from
+    # MISSING_BANK_CREDIT and it sends the analyst somewhere else entirely: chase
+    # the gateway and the beneficiary details, not the bank. Resolvable, because
+    # unlike REFUND_ORPHANED the evidence IS in the extract: `status` says so.
+    SETTLEMENT_FAILED = ("SETTLEMENT_FAILED", True, 0, True)
     DUPLICATE_PAYMENT = ("DUPLICATE_PAYMENT", True, 0, True)
     # --- explained-but-notable: real, reportable, and NOT breaks (Sec 6) -------
     # Typing an adjustment as a reserve needs the rate card: the Sec 3.1 schema

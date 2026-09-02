@@ -358,3 +358,123 @@ reason recorded in the Decisions Log, not silence.
 ---
 
 <!-- New entries below. Keep the date, what broke, why it mattered, and the recovery. -->
+
+
+---
+
+### F-016 · 02 Sep 2026 · Tier 1 quietly retired a gate Tier 0 applied, and the ledger posted on it
+
+**What broke.** Tier 0 marks a bank edge explained only when two things hold: the decomposition
+closes, **and** the credit ties out to the settlement's own reported total
+(`tier0.py`, `explained = decomposition.is_fully_explained and ties_out`). Tier 1 recomputed that as
+`explained = decomposition.is_fully_explained` — the first conjunct alone — and then **overwrote the
+edge status**. A settlement whose reported total contradicted both its line items and the bank credit
+was therefore marked fully EXPLAINED and **auto-posted to the ledger**.
+
+Measured on the dev seed the moment data existed that could trigger it:
+
+```
+setl_4lT0URK4hJ3Ad0   report Rs 1,38,476.30   bank Rs 1,40,714.87   diff Rs 2,238.57   -> je posted
+setl_egI36JZIezdPrf   report Rs 1,64,302.88   bank Rs 1,67,424.59   diff Rs 3,121.71   -> je posted
+```
+
+One run then asserted two contradictory things about the same two settlements: `decomposition
+closure` reported them as not closing, while the headline counted them as explained and the journal
+posted them. README's *"the ledger posts nothing it cannot fully explain"* was false as shipped.
+
+**Cause, and why it was invisible for two increments.** The defect landed with Tier 1 at Increment 2
+and could not be detected by any test, because **no generated data could make the tie-out fail**. The
+settlement entity view reported a total computed from the same line items the resolver re-sums, and
+the bank credit was copied from that total. Both sides of both identities came from one number.
+
+That is D-003 — *every identity must have its two sides sourced independently, or it is decoration* —
+reappearing one layer up, in the generator rather than in the resolver. `ARCHITECTURE.md` §4 had
+already named it as an acknowledged simplification and called fixing it "the highest-value remaining
+generator work". It was not cosmetic. It was hiding a live defect in the check that guards the ledger.
+
+**How it was found.** Not by the test suite, which stayed green. By injecting the thing §4 said was
+missing — a settlement entity whose reported `amount` was struck before one of its own line items
+posted — and then *looking at the edge status* rather than at the headline. The headline did not move
+at all on dev, which is what made it worth looking: closure had dropped to 20/22 and explanation had
+not budged, and those two facts cannot both be right.
+
+**Recovery.**
+1. Tier 1 inherits the conjunct: `explained = closed and bank_tie_out_holds(actual, settlement.amount)`.
+2. A closed residual that fails the tie-out raises **no new exception**. The event is already queued
+   as `ROLLUP_MISMATCH` against the settlement, and the record Tier 1 would have raised reads
+   "Rs 0.00 survives the full deduction decomposition", which is meaningless.
+3. Supersession re-keyed. D-020 dropped Tier 0's intermediate `AMOUNT_VARIANCE_UNEXPLAINED` when the
+   edge reached EXPLAINED. Closed-and-explained had been the same thing until now; once they came
+   apart, Tier 0's record survived on exactly these edges, telling an analyst that a reserve or refund
+   "needs the contracted rate card to name" when Tier 1 had already named every component. It is now
+   keyed on what the record actually claims — whether the residual closed — not on the edge's status.
+
+**Measured after.** dev explanation 20/24 -> **18/24**, coverage 20/22 -> **18/22**, journal entries
+20 -> **18**; eval unchanged at 19/24. Statement foots on both. False clear in remit 0.00% on both.
+**188 tests**, including two new parametrised regression guards that assert the *property* — nothing
+posts while the report disagrees with the cash — rather than a count.
+
+**A second rule found leaning on the same field, and left alone deliberately.** The instant-settlement
+fee is identified as 25 bps of `settlement.amount + fee`, so on a `setlod_` cycle with a stale total
+the fee line goes untyped and the residual stays OPEN. That is the correct degradation and it was not
+"fixed": typing a component off a number the system has just flagged as untrustworthy would be a guess
+wearing an identity's clothes. The settlement is queued once and posts nothing either way.
+
+**Standing consequence.** A tier may add explanation. It may never silently retire a check a lower
+tier already applied. And an identity that cannot fail is not a passing test — it is an untested
+region with a green light over it.
+
+
+---
+
+### F-017 · 02 Sep 2026 · Tier 2 linked a credit to a settlement Tier 0 had just declared failed
+
+**What broke.** On the held-out seed, Tier 2 corroborated bank credit `bc_2544693262d` against
+settlement `setl_q7HIlAvG26Lo14` on an exact `(amount, value_date)` match, and Tier 1 marked it
+explained. That settlement carries **`status: failed`** — and in the same run, Tier 0 had already read
+that field and queued it as `SETTLEMENT_FAILED`, *"the gateway attempted the transfer and it did not
+complete, so the money never left"*. One run, two tiers, opposite conclusions about one settlement.
+
+Two invariants broke at once, both of which had held for the entire project:
+
+| eval | before | during | after |
+|---|---|---|---|
+| **False clear, in remit** — must be zero | 0.00% (0/186) | **0.53% (1/187)** | **0.00% (0/187)** |
+| **Linkage precision** | 100.00% | **99.97%** — bank grain **18/19** | **100.00%** — 18/18 |
+| Exception detection recall | 100.00% | 99.47% (186/187) | 100.00% (187/187) |
+
+Dev was clean throughout at 100.00% and 0/195. A defect visible on one seed and not the other is
+exactly the shape F-009 exists to catch, and it is why both seeds are parameterised.
+
+**Cause 1 — the generated world could not exist.** `_inject_bank_anomalies` had already created a
+`DUPLICATE_UTR` credit copying that settlement's UTR, amount and date. `_inject_failed_settlements`
+then failed the same settlement, which deletes its genuine credit. The statement was left holding a
+**duplicate posting of a transfer that never happened**, and with the real partner gone the duplicate
+became the unique `(amount, date)` match. The new injector filtered on `s.anomaly is None`, but the
+duplicate-UTR anomaly attaches to the extra *credit*, not to the settlement it was copied from, so the
+settlement still looked clean. My bug, introduced with C-2(b).
+
+**Cause 2 — and this one is not about synthetic data at all.** Tier 2's candidate pool was every
+settlement not already linked. It never consulted `status`. A real statement can easily carry an
+unrelated credit that matches a failed settlement's amount and date; two fields agreeing is
+corroboration, and there is nothing to corroborate once the gateway has said the transfer did not
+complete. The fence Tier 0 built was simply not visible to the tier above it.
+
+**Recovery.**
+1. `_inject_failed_settlements` excludes any settlement whose UTR already sources an extra bank
+   credit. Asserted over the generated data, not over the injector, so it survives reordering.
+2. Tier 2 excludes non-`processed` settlements from its candidate pool entirely.
+
+**Measured after.** eval false clear **0.00% (0/187)**, linkage precision **100.00%** at every grain,
+detection recall **100.00%**, statement foots on both seeds, determinism byte-identical on both.
+**192 tests**, including two new parametrised guards asserting the properties rather than counts.
+
+**Standing consequence — and this is the second instance in two days.** F-016 was Tier 1 dropping a
+gate Tier 0 applied. F-017 is Tier 2 linking against a unit Tier 0 excluded. Same shape both times:
+
+> **A tier may add explanation. It may never widen the candidate set, relax a gate, or contradict a
+> fact that a lower tier has already established from the sources.**
+
+The graph model lets any tier overwrite an edge's status, and nothing carries forward what earlier
+tiers concluded about a *unit*. Two instances is a pattern, not a coincidence, and the third will land
+in whatever tier is built next. See RUN_LOG for the proposed general guard and its cost.

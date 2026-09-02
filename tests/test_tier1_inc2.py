@@ -19,7 +19,7 @@ from recon.domain.graph import (BUILT_TIER, ComponentBasis, ComponentType, EdgeK
 from recon.domain.truth import GroundTruth
 from recon.ingest.load import load_all
 from recon.ledger.statement import COMPONENT_ACCOUNTS
-from recon.resolve import tier0, tier1
+from recon.resolve import pipeline, tier0, tier1
 
 SEEDS = ("dev", "eval")
 
@@ -79,11 +79,31 @@ def test_decomposition_closes_the_gap_on_both_seeds(seed, generated, generated_e
     has nothing to do with the arithmetic, so the headline cannot answer the
     question the Increment 2 gate actually asks.
     """
-    repo = _repo(generated if seed == "dev" else generated_eval)
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = _repo(data_dir)
     closed, total, by_basis = tier1.closure_report(repo)
     assert total > 0
-    assert closed == total, f"{seed}: {total - closed} settlements left an untyped gap"
     assert by_basis, "the circularity split must be populated"
+
+    # `closed == total` was the assertion until 02 Sep, and it was only meetable
+    # because no settlement's REPORTED total could ever be wrong. Now that a stale
+    # total exists, a gap can fail to close for a reason that has nothing to do
+    # with the arithmetic -- the two sides of the subtraction disagree because the
+    # input is corrupt.
+    #
+    # Relaxing the assertion to a count would hide exactly the regression it is
+    # here to catch, so it is made STRICTER instead: name the settlements that may
+    # fail, and require them to be precisely the ones ground truth says carry a
+    # stale total. An arithmetic failure anywhere else still fails this test, and
+    # a stale total that silently closed would fail it too.
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+    corrupt = {u.uid for u in truth.units
+               if u.kind == "settlement" and u.anomaly == "ROLLUP_MISMATCH"}
+    assert corrupt, "the fixture no longer injects a stale total; this test is blind"
+    assert set(tier1.unclosed_settlements(repo)) == corrupt, (
+        f"{seed}: the settlements Tier 1 could not close are not the ones whose "
+        "reported total is corrupt")
+    assert closed == total - len(corrupt)
 
 
 @pytest.mark.parametrize("seed", SEEDS)
@@ -305,3 +325,84 @@ def test_a_parse_failure_is_our_limitation_not_a_merchant_break(generated_eval, 
     unparsed = [r for r in result.exceptions if r.code == "NARRATION_UNPARSEABLE"]
     assert unparsed, "the held-out seed must still exercise the parser failing"
     assert all(not r.is_break for r in unparsed)
+
+
+# --- F-016: a tier may not silently retire a lower tier's check ---------------
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_tier1_does_not_post_a_settlement_whose_report_contradicts_the_bank(
+        seed, generated, generated_eval, tmp_path_factory):
+    """THE regression guard for F-016.
+
+    Tier 0 marks a bank edge explained only when the decomposition closes AND the
+    credit ties out to the settlement's own reported total. Tier 1 recomputed that
+    as the first conjunct alone and then overwrote the status, so a settlement
+    whose report contradicted both its line items and the bank was declared fully
+    explained and auto-posted to the ledger.
+
+    It survived from Increment 2 to 02 Sep because no data could make the tie-out
+    fail. This test is the reason it cannot come back: it asserts the property
+    ("nothing posts while the report disagrees with the cash"), not a count, so it
+    keeps working whatever the injection rate becomes.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    out = tmp_path_factory.mktemp("f016") / seed
+    repo = _repo(data_dir)
+    result = pipeline.run(data_dir, out)
+
+    posted = {entry.entry_id[len("je_"):] for entry in result.journal}
+    for edge in result.edges:
+        if edge.kind is not EdgeKind.BANK_TO_SETTLEMENT:
+            continue
+        reported = int(repo.settlements[edge.dst_uid].amount)
+        actual = int(edge.decomposition.actual)
+        if reported == actual:
+            continue
+        assert edge.status is not EdgeStatus.EXPLAINED, (
+            f"{edge.dst_uid}: settlement reports {reported} and the bank credited "
+            f"{actual}, yet the edge is marked fully explained")
+        assert edge.dst_uid not in posted, (
+            f"{edge.dst_uid}: a journal entry was posted for a settlement whose own "
+            "report contradicts the bank credit")
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_a_stale_total_is_queued_once_and_named_correctly(
+        seed, generated, generated_eval, tmp_path_factory):
+    """One event, one queue entry, and the entry says the true thing.
+
+    Two records reached the analyst for a single stale total: ROLLUP_MISMATCH,
+    which is correct, and Tier 0's AMOUNT_VARIANCE_UNEXPLAINED, which by then was
+    false -- Tier 1 had typed every component and closed the residual. D-020's
+    supersession keyed on the edge reaching EXPLAINED, and those two things came
+    apart the moment a closed residual could still be withheld from the ledger.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    out = tmp_path_factory.mktemp("stale") / seed
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+    result = pipeline.run(data_dir, out)
+
+    corrupt = {u.uid for u in truth.units
+               if u.kind == "settlement" and u.anomaly == "ROLLUP_MISMATCH"}
+    assert corrupt, "the fixture no longer injects a stale total; this test is blind"
+
+    posted = {entry.entry_id[len("je_"):] for entry in result.journal}
+    for settlement_id in corrupt:
+        breaks = [r.code for r in result.exceptions
+                  if r.subject_id == settlement_id and r.is_break]
+        assert breaks == [ExceptionType.ROLLUP_MISMATCH.code], (
+            f"{settlement_id}: expected exactly one break, ROLLUP_MISMATCH, got {breaks}")
+        assert settlement_id not in posted
+
+    # Informational records may legitimately coexist: on the held-out seed the
+    # stale total also breaks Tier 2's (amount, date) key, so the settlement is
+    # additionally SETTLEMENT_UNCONFIRMED -- true, not a break, and a different
+    # statement (D-031). Only the BREAK count is asserted above.
+    #
+    # Nor is the residual asserted to close. A rule keyed on the corrupted field
+    # cannot fire: the instant-settlement fee is identified as 25 bps of
+    # `settlement.amount + fee`, so on a `setlod_` cycle with a stale total the
+    # fee line goes untyped and the residual stays OPEN. That is the correct
+    # degradation -- typing a component off a number we have just flagged as
+    # untrustworthy would be a guess wearing an identity's clothes -- and either
+    # way the settlement is queued once and posts nothing.

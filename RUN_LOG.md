@@ -798,3 +798,211 @@ would drop false alarms to near zero and is the obvious next candidate.
 
 FIX-10 (a third seed on a different rate card) remains declined per D-024, and nothing in the audit
 weakened that reasoning.
+
+
+---
+
+## Realism increment — C-4(i): the identities that could not fail · 02 Sep 2026
+
+**Why this increment exists.** A principal-level review asked whether "the LLM adds nothing" is a
+fact about reconciliation or an artifact of the generator, and scoped the answer to the realism gaps
+**already acknowledged** in `ARCHITECTURE.md` §4. No new sources of ambiguity, and no change whose
+justification is "this would give the LLM something to do". §4 nominated one item itself as the
+highest-value remaining generator work, and this is it.
+
+**One measurement taken first, because it reframes the question.** The oracle adjudicator — a perfect
+extractor built from ground truth — is the **upper bound on any model**, and it needs no API key
+(there is none in this environment). Before any change:
+
+| oracle headroom, credits a perfect extractor adds over the deterministic tiers | dev | eval |
+|---|---|---|
+| before this increment | **0 of 24** | **1 of 24** |
+
+So the published "+T3 LLM adds nothing" was measured against a live model that returned nothing
+usable; the stronger available statement was that **the ceiling was one credit and the model captured
+none of it**. That one credit exists only because of an injected `DUPLICATE_UTR`, which Tier 2 refuses
+as a tie.
+
+### The change
+
+`settlements.jsonl` is a separate endpoint from the recon line items (D-003), so the two are read at
+different instants. An extract taken while a line is still posting carries a total struck **before**
+that line. Two settlements per seed now report such a total. Only the derived entity view goes stale:
+the line items and the bank credit follow the money that actually moved, because a reporting lag does
+not change what the bank paid.
+
+This is the ordinary cause of a real rollup break, and it is the sentence Tier 0's hypothesis text has
+been offering since Increment 0 — *"Either a line item is missing from the report or the total is
+stale"* — with no data able to trigger it.
+
+### It found a live defect within minutes. See F-016.
+
+Tier 1 was silently dropping the bank tie-out conjunct that Tier 0 applies, and **posting journal
+entries for settlements whose own report contradicted the bank**. Two on dev, at Rs 2,238.57 and
+Rs 3,121.71. The suite stayed green throughout; the tell was that `decomposition closure` fell to
+20/22 while the headline did not move at all, and those two facts cannot both be right.
+
+The defect had been live since Increment 2 and was **undetectable by construction** — no generated
+data could make the tie-out fail. An identity that cannot fail is not a passing test.
+
+### Measured, after the injection and the F-016 fix
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate · settlement coverage | 83.33% (20/24) · 90.91% (20/22) -> **75.00% (18/24) · 81.82% (18/22)** | 83.33% (20/24) · 90.91% (20/22) -> **79.17% (19/24) · 86.36% (19/22)** |
+| Decomposition closure | 100.00% (22/22) -> **90.91% (20/22)** | 100.00% (22/22) -> **90.91% (20/22)** |
+| Journal entries, all balanced | 20 -> **18** | 20 -> **19** |
+| Statement foots | **YES** | **YES** |
+| Exception detection recall | 100.00% (194/194) | 100.00% (186/186) |
+| **False clear, in remit** | **0.00% (0/194)** | **0.00% (0/186)** |
+| Linkage precision | 100.00% (3,388/3,388) | 100.00% (3,507/3,507) |
+| Exception queue precision | 94.61% -> **94.66% (195/206)** | 92.89% -> **92.96% (185/199)** |
+| Determinism, two runs | byte-identical | byte-identical |
+| Tests | **188 passed** | — |
+
+Every headline number moved **down**, and that is the increment working. The system was previously
+claiming to have explained two settlements per seed that it had not.
+
+### The two link paths fail differently, and that is a result
+
+The same anomaly produces two completely different failures depending on which tier established the
+link:
+
+- **UTR path (dev).** The settlement is linked, the residual closes, and the tie-out is the only thing
+  standing between it and the ledger. Before F-016 nothing was standing there at all.
+- **Corroboration path (eval).** Tier 2 keys on `(amount, value_date)` where `amount` is the
+  **reported** total. A stale total means the key no longer matches its own credit, so the settlement
+  is **never linked** — silently. Tier 0 at least raises `ROLLUP_MISMATCH`; Tier 2 just finds nothing.
+
+Tier 2's key is built from a field that can be wrong, and when it is wrong the tier fails quietly.
+That is worth saying out loud next to the claim that corroboration reproduced the whole result.
+
+### Prediction 1, as registered before the work
+
+> "Decomposition closure drops below 100% by exactly the number injected, ROLLUP_MISMATCH fires for
+> the first time on real data, LLM contribution unchanged at zero."
+
+All three held. The prediction was **incomplete rather than wrong**: it said nothing about the
+headline, and the headline not moving on dev was the defect. Recorded because a prediction that is
+right about everything it mentions and silent about the thing that breaks is not a success.
+
+### What this did to the LLM's ceiling — measured, both directions
+
+| oracle headroom (explanation) | dev | eval |
+|---|---|---|
+| before | 0 of 24 | 1 of 24 |
+| after | **0 of 24** | **0 of 24** |
+
+The ceiling went **down**, not up: the one credit a perfect extractor could previously add is still
+linkable, but is no longer explainable, because the tie-out now correctly withholds it.
+
+**At the linkage grain the ceiling went up, and this is the first time in this project that an
+extractor can do something no deterministic tier can:**
+
+| eval, linkage recall | rules only | + perfect extractor |
+|---|---|---|
+| before this increment | 99.97% (3,508/3,509) | 99.97% |
+| after | 99.94% (3,507/3,509) | **100.00% (3,509/3,509)** |
+
+The stale totals cost Tier 2 exactly two links, and only extraction recovers them — because the UTR
+is the one reference that does not depend on any amount being right. **That is the real-world argument
+for the UTR, arriving as a measurement rather than as an assertion.**
+
+It does **not** move the headline: those two links convert to zero additional explained settlements,
+because the report still contradicts itself and nothing posts. Both halves get published together —
+an extractor buys linkage here, and linkage is not the job.
+
+Whether a real model captures those two links is **unmeasured**: no `ANTHROPIC_API_KEY` in this
+environment. The oracle is an upper bound and is labelled as one, exactly as at Increment 3 (D-022).
+
+
+---
+
+## Realism increment — C-2(b): failed settlements · 02 Sep 2026
+
+**The gap, as named in `ARCHITECTURE.md` §4:** *"all `status: processed`, no failed or reversed
+settlements"*. `derive_settlement_entities` hard-coded `"processed"` on every row. The field was
+loaded, printed inside Tier 0's evidence, and **never decided on** — so the one fact a real settlement
+report gives you about why a credit is absent was being thrown away.
+
+**Why it matters, in one sentence.** A failed settlement and a missing credit are *identical* in the
+bank statement — neither has a row — and they are opposite findings. One says the gateway told us the
+transfer did not complete, and the analyst chases beneficiary details. The other says the money left
+and never landed, and the analyst chases the bank. Reporting the first as the second is F-014 one step
+along: asserting more than the evidence supports.
+
+One settlement per seed now carries `status: failed` and no credit, drawn from the **last quarter** of
+the window so that "not yet re-settled" is the honest reading. Modelling the re-issue would put the
+same underlying sales under two settlement ids — a real shape, but a much larger change than the gap
+named, and outside the boundary this increment was given.
+
+`SETTLEMENT_FAILED` is declared (D-013's rule: a code is declared only once the generator can produce
+it), is a **break** — money that should be in the bank is not — and is **resolvable**, because unlike
+`REFUND_ORPHANED` the evidence is in the extract. Tier 0 checks `status` *before* either weaker claim,
+since `MISSING_BANK_CREDIT` and `SETTLEMENT_UNCONFIRMED` are both inferences from absence and this is
+a fact the report states. Its queue entry routes to treasury with a different action.
+
+### It broke two invariants on the held-out seed. See F-017.
+
+Tier 2 corroborated a credit against a settlement whose status was `failed` — the same settlement
+Tier 0 had just queued as `SETTLEMENT_FAILED` in that run. False clear in remit went to **0.53%
+(1/187)** and linkage precision to **99.97%**, both for the first time in the project's history. Dev
+stayed clean, so it was visible on one seed only (F-009's shape).
+
+Two causes, and only one of them was about synthetic data:
+- the injectors composed into a world that cannot exist — a duplicate posting of a transfer that never
+  happened (my bug, fixed);
+- **Tier 2's candidate pool never consulted `status`** — a real defect that a real statement would
+  expose just as readily (fixed).
+
+### Measured, after the fixes
+
+| | dev | eval (held out) |
+|---|---|---|
+| Explanation rate · settlement coverage | 18/24 · 18/22 -> **17/23 (73.91%) · 17/22 (77.27%)** | 19/24 · 19/22 -> **18/23 (78.26%) · 18/22 (81.82%)** |
+| Money-weighted coverage | **77.06%** | **82.16%** |
+| Exception detection recall | **100.00% (195/195)** | **100.00% (187/187)** |
+| **False clear, in remit** | **0.00% (0/195)** | **0.00% (0/187)** |
+| **Linkage precision** (bank grain) | **100.00%** (19/19) | **100.00%** (18/18) |
+| Exception typing accuracy | **100.00%** | 98.93% (185/187) |
+| Exception queue precision | 94.66% -> **94.69% (196/207)** | 92.96% -> **93.00% (186/200)** |
+| `MISSING_BANK_CREDIT` raised / real | 1 / 1 | 0 / 0 |
+| `SETTLEMENT_FAILED` raised / real | **1 / 1** | **1 / 1** |
+| Journal entries, all balanced | 17 | 18 |
+| Statement foots | **YES** | **YES** |
+| Determinism, two runs | byte-identical | byte-identical |
+| Tests | **192 passed** | — |
+
+The bank-credit denominator drops 24 -> 23 on both seeds: a failed settlement produces no credit, so
+there is one fewer row in the statement. The headline falls accordingly, and correctly.
+
+### Prediction 2, as registered before the work
+
+> "Failed settlements produce settlements with no credit that are correctly *not* breaks. Queue
+> precision improves; LLM unaffected."
+
+**Two parts wrong, one right, and the wrong parts were the useful ones.**
+
+1. **"correctly *not* breaks" was wrong, and I changed the design rather than the prediction.**
+   A failed settlement *is* a break: money that should be in the bank is not, and someone must act.
+   What differs from `MISSING_BANK_CREDIT` is the evidence and the action, not the severity. Declaring
+   it informational would have understated a real cash shortfall to make a number look tidy.
+2. **It said nothing about interactions, and the interaction was the whole event.** A new anomaly
+   class composed with an existing one to produce an impossible world, which then exposed a live gap
+   in Tier 2's candidate rule. Prediction 2 reasoned about the new class in isolation; anomalies do
+   not arrive in isolation.
+3. Queue precision did improve on both seeds, and the LLM contribution was unaffected. That part held.
+
+### The LLM's ceiling, re-measured
+
+| oracle headroom (explanation) | dev | eval |
+|---|---|---|
+| before this increment | 0 of 24 | 0 of 24 |
+| after | **0 of 23** | **0 of 23** |
+
+Unchanged at zero. At the **linkage** grain the oracle still recovers what the deterministic tiers
+cannot: eval bank-grain edges go **18 -> 20** with a perfect extractor, because a stale total breaks
+Tier 2's key and only the UTR is independent of every amount being right. Those two links still
+convert to **zero** additional explained settlements, and both halves are published together.
+
+Still unmeasured with a real model: no `ANTHROPIC_API_KEY` in this environment (D-022).

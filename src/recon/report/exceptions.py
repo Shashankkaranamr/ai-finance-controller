@@ -36,6 +36,12 @@ PLAYBOOK: dict[ExceptionType, tuple[str, str]] = {
         "Confirm whether the settlement is still in transit (T+2 not yet elapsed) "
         "before treating it as missing; if elapsed, raise with the gateway quoting the UTR.",
         "treasury"),
+    ExceptionType.SETTLEMENT_FAILED: (
+        "The gateway reported this transfer as failed, so the money never left and the "
+        "bank has not lost it. Confirm the beneficiary account details with the gateway "
+        "and expect the amount to re-settle in a later cycle; do not raise it as a "
+        "missing credit.",
+        "treasury"),
     ExceptionType.UNMATCHED_BANK_CREDIT: (
         "Identify the payer. Likely a non-gateway receipt or a second aggregator; "
         "do not force-match to an open settlement.",

@@ -35,6 +35,10 @@ from ..ingest.load import Repository
 from ..money import Paise, format_inr
 from ..report.exceptions import SUBJECT_EDGE, SUBJECT_UNIT, ExceptionRecord
 
+# The one `status` value that means "the money left". Anything else is the
+# gateway telling us why there is no credit, and must be read before inferring.
+SETTLEMENT_PROCESSED = "processed"
+
 
 def resolve(repo: Repository, audit: AuditLog) -> tuple[list[ReconEdge], list[ExceptionRecord]]:
     edges: list[ReconEdge] = []
@@ -538,6 +542,44 @@ def _flag_missing_bank_credits(repo, matched_settlements, unread, exceptions, au
         if settlement_id in matched_settlements:
             continue
         settlement = repo.settlements[settlement_id]
+
+        # THE GATEWAY ALREADY ANSWERED THIS ONE. READ IT BEFORE GUESSING.
+        #
+        # A failed settlement and a missing credit are indistinguishable in the
+        # bank statement -- neither has a row -- and opposite findings. `status`
+        # is the only field that separates them, and it is checked FIRST, before
+        # either weaker claim, because both of those are inferences from absence
+        # and this is a fact the report states. Same discipline as D-031: never
+        # assert more than the evidence supports.
+        if settlement.status != SETTLEMENT_PROCESSED:
+            exceptions.append(ExceptionRecord.build(
+                ExceptionType.SETTLEMENT_FAILED, SUBJECT_UNIT, settlement_id,
+                Paise(settlement.amount),
+                hypothesis=(
+                    f"Settlement {settlement_id} for "
+                    f"{format_inr(Paise(settlement.amount))} carries status "
+                    f"'{settlement.status}', and no bank credit appears for it. The "
+                    "gateway attempted the transfer and it did not complete, so the "
+                    "money never left -- this is not a credit the bank has lost. "
+                    "Confirm the beneficiary details with the gateway and expect the "
+                    "amount to re-settle in a later cycle."),
+                confidence=100,
+                evidence=(
+                    Evidence("settlement_status",
+                             f"status={settlement.status} (expected "
+                             f"'{SETTLEMENT_PROCESSED}'), utr={settlement.utr}, "
+                             f"amount={int(settlement.amount)}",
+                             (f"settlement:{settlement_id}",)),
+                    Evidence("no_credit_expected",
+                             "a settlement in this state produces no bank credit, so "
+                             "the absence corroborates the status rather than "
+                             "contradicting it",
+                             (f"settlement:{settlement_id}",)),
+                )))
+            audit.record("settlement_failed", settlement=settlement_id,
+                         status=settlement.status, amount=int(settlement.amount))
+            continue
+
         if unread:
             exceptions.append(ExceptionRecord.build(
                 ExceptionType.SETTLEMENT_UNCONFIRMED, SUBJECT_UNIT, settlement_id,

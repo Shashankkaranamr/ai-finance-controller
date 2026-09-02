@@ -7,6 +7,8 @@ that makes the corroboration defensible rather than lucky.
 """
 from __future__ import annotations
 
+import pytest
+
 from recon.domain.graph import EdgeKind, EdgeStatus, Tier
 from recon.domain.truth import GroundTruth
 from recon.ingest.load import load_all
@@ -106,3 +108,59 @@ def test_corroboration_supersedes_the_alarms_it_answers(generated_eval, tmp_path
         assert ("NARRATION_UNPARSEABLE", ref) not in codes
     for sid in settled:
         assert ("SETTLEMENT_UNCONFIRMED", sid) not in codes
+
+
+# --- F-017: a tier may not link against what a lower tier excluded ------------
+
+@pytest.mark.parametrize("seed", ("dev", "eval"))
+def test_corroboration_never_links_a_settlement_that_never_paid_out(
+        seed, generated, generated_eval, tmp_path_factory):
+    """THE regression guard for F-017.
+
+    Tier 0 reads `status` and reports a non-`processed` settlement as
+    SETTLEMENT_FAILED -- the money never left. Tier 2 corroborated a credit
+    against exactly such a settlement anyway and marked it explained, so one run
+    asserted two contradictory things about the same settlement.
+
+    The property, not the count: no credit may link to a settlement the report
+    says did not pay out, whatever the amounts happen to be.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = load_all(data_dir)
+    result = pipeline.run(data_dir, tmp_path_factory.mktemp("f017") / seed)
+
+    for edge in result.edges:
+        if edge.kind is not EdgeKind.BANK_TO_SETTLEMENT:
+            continue
+        status = repo.settlements[edge.dst_uid].status
+        assert status == "processed", (
+            f"{edge.src_uid} was linked to {edge.dst_uid}, whose status is "
+            f"'{status}' -- a settlement that never paid out is not a link target")
+
+
+@pytest.mark.parametrize("seed", ("dev", "eval"))
+def test_a_failed_settlement_is_never_also_double_posted(
+        seed, generated, generated_eval):
+    """The world has to be one that could exist.
+
+    A duplicate posting exists BECAUSE the original landed, so a settlement whose
+    transfer failed cannot also have been double-posted. Injecting both onto one
+    settlement left the statement holding a duplicate of a transfer that never
+    happened -- and with its genuine partner deleted, that duplicate became the
+    unique (amount, date) match and got linked (F-017).
+
+    Asserted over the generated data rather than over the injector, so it holds
+    however the injection order is later rearranged.
+    """
+    data_dir = generated if seed == "dev" else generated_eval
+    repo = load_all(data_dir)
+    truth = GroundTruth.read(data_dir / "ground_truth.json")
+
+    failed = {s.utr for s in repo.settlements.values() if s.status != "processed"}
+    duplicated = {u.uid for u in truth.units if u.anomaly == "DUPLICATE_UTR"}
+    for ref in duplicated:
+        credit = repo.bank[ref]
+        overlap = [utr for utr in failed if utr.lower() in credit.narration.lower()]
+        assert not overlap, (
+            f"credit {ref} duplicates a transfer for a settlement whose status is "
+            "failed; that world cannot exist")
