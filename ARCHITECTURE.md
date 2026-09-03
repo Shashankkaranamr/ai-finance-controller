@@ -267,14 +267,49 @@ re-validates perfectly and is arithmetic nonsense.
 mapping is blocked with the rows left quarantined, and a truthful one is **accepted** — a gate that
 rejects everything is a wall, not a fence.
 
-**Run live once, 03 Sep**: `claude-haiku-4-5` proposed the correct mapping on the first attempt and
-every gate then in place admitted it, recovering 1,789 rows. That is **n=1** — a smoke test that came back
-correct, not an accuracy figure, and it is the fence rather than the model that this design claims.
+**Measured live over ten pre-registered drift scenarios**, one call each, no re-rolls:
+`claude-haiku-4-5` returns **8 of 10 mappings exactly correct**, and returns *the same* 8 of 10 across
+three independent runs — failing the same two scenarios every time. The failure mode is therefore a
+stable property rather than sampling noise. It maps seven fully opaque columns correctly from values
+alone and fails where a column's name asserts the opposite of what the column holds.
+
+**The fence did not survive its own first test, and that is Finding 5.**
 
 **Measured on a drifted view**, rules-only in-remit false clear is **190/195 on dev and 180/187 on
 eval**; a verified repair returns the run to **17/23 and 0/195**, **18/23 and 0/187** — byte-for-byte
 its clean figures. That number also reframes invariant 10: in-remit false clear is zero **conditional
 on the inputs loading**, and nothing before this made the condition visible.
+
+### Finding 5 — the fence accepted every wrong mapping on its first real test
+
+The first live run of the ten scenarios produced **zero discriminating power**: all ten mappings
+accepted, including both the model got wrong. One of them installed an inverted ledger and put **four
+real breaks through as clean**, in-remit false clear 0/187 → 4/187.
+
+Three gates exist because of what followed, and each failed for a reason worth naming:
+
+| defect | why the fence could not see it |
+|---|---|
+| credit/debit inversion | the sign rule was **symmetric**. `not (credit > 0 and debit > 0)` is *preserved* by the swap — a payment moves from credit>0/debit=0 to credit=0/debit>0 and still has exactly one non-zero side. The invariant was preserved by the very swap it existed to catch |
+| amount/fees inversion | `settlements` had a single containment, `tax <= fees`, which a lakh-sized value in `fees` satisfies comfortably. Closed with an independently sourced second opinion: `fees` must equal the summed line-item fees (D-003) |
+| **order_id/payment_id swap** | every gate was an assertion about a **row**. Nothing asserted anything about the **edges between** rows — in a system whose entire model is a graph of typed edges |
+
+The third is the one with the general lesson. Detection recall fell to **58.29%** and 40% of the
+exception queue vanished, while `blocked_bad_mapping` read 0, the statement footed, `degraded` read
+false and **linkage precision read 100.00%**. Precision asks whether the links we *made* were right;
+it cannot ask whether the links we *should have made* were attempted, because an absent edge carries
+no evidence — the D-002 problem arriving from a new direction. Three published safety signals read
+clean at once. Ground truth caught it, and production does not have ground truth.
+
+After the three fixes, replayed and re-run live: **8 accepted, 0 correct blocked, 0 wrong accepted,
+2 wrong blocked.**
+
+**What this does not establish.** The last two gates were written against the failures found, so
+catching them is true by construction. Whether the fence discriminates on shapes it was *not* built
+against is unmeasured: the mechanically enumerated fresh suite that would answer it was declined on
+time rather than merit (D-037), and the limits of each gate — two keys only, `payment_id` excluded at
+a measured 89.53%, skipped entirely when the referenced view is absent — are asserted by tests rather
+than described in prose.
 
 ### Where determinism stops
 

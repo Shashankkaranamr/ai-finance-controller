@@ -82,11 +82,12 @@ reconciliation or an artifact of data we wrote ourselves, and published which ha
 ---
 
 **Status:** Increments 0–3 complete, plus a realism increment on 02 Sep that closed three
-acknowledged generator gaps and re-measured everything, and a schema-repair increment the same day
-that fixed a live defect (F-018) and added the LLM's second fenced job (D-036). This is an
-incremental build:
+acknowledged generator gaps and re-measured everything; a schema-repair increment the same day that
+fixed a live defect (F-018) and added the LLM's second fenced job (D-036); and on 03 Sep a
+ten-scenario live measurement of that job, which found the fence accepting every wrong mapping and
+closed three gate defects (F-021, F-022). Engine work stopped 03 Sep. This is an incremental build:
 [PLAN.md](PLAN.md) records every decision and what each one ruled out · [RUN_LOG.md](RUN_LOG.md) has
-the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has nineteen real
+the numbers as they were measured at each gate · [FAILURE_LOG.md](FAILURE_LOG.md) has twenty-two real
 dated incidents · [ARCHITECTURE.md](ARCHITECTURE.md) is the design walkthrough.
 
 ---
@@ -481,23 +482,74 @@ renamed:
 zero on every run for eight days. It is zero **conditional on the inputs loading**, and nothing before
 this made that condition visible. The guarantee was never as unconditional as this README implied.
 
-**Run live once, on 03 Sep.** `claude-haiku-4-5`, one call, 3.9 s. The model proposed 26 entries with
-exactly one non-identity mapping — `entity_ref → entity_id` — and it was right. All gates then in place passed,
-1,789 rows recovered, and the run landed on **18/23 with false clear 0/187**: byte-for-byte its
-undrifted figures. Its stated reason cited the *value*, not the column name:
+### What the model actually does, and what the fence actually caught
 
-> *"The observed column 'entity_ref' contains a settlement reference identifier
-> ('setlodp_gOFf7SqYMFy5PU') and maps to the target field 'entity_id'…"*
+Ten drift scenarios, **pre-registered with a per-scenario prediction before any code was written**,
+covering four shapes: a single obvious rename, a single ambiguous one, three renames at once, and a
+name that actively lies. Run live on the held-out seed, one call each, no re-rolls.
 
-which is the behaviour the job needs, because a renamed column is exactly the case where the name
-cannot be trusted.
+**Model accuracy: 8 of 10, and the same 8 of 10 across three independent live runs — failing the same
+two scenarios every time.** That the failures reproduce means this is a stable property of the model,
+not sampling noise, which is a stronger claim than any single run supports.
 
-**What that is not.** It is **one mapping, one view, one seed — n=1.** A smoke test that returned a
-correct answer, not a measurement of how often the model is right. Quoting "100%" from this would be
-quoting 1/1. A real accuracy figure needs many drift shapes and a held-out set of renames the prompt
-was never written against; none of that exists, and none of it will before the deadline. **The claim
-this project makes is about the fence, not the model** — a wrong mapping still cannot reach the
-ledger, and that came from the gates, not from the model being right on the day.
+It read *values* better than expected and *names* worse. It correctly mapped **seven fully opaque
+columns** (`c1`…`c7`, no name signal at all) and three competing date fields — the two cases the
+prediction said it would fail. It failed exactly where the column name asserts the opposite of what
+the column holds:
+
+| | predicted | measured |
+|---|---|---|
+| accuracy | 7/10 | **8/10** — wrong, in the flattering direction |
+| named failures | S10, S9, S4 | **S7, S9** — one of three |
+
+**The rationales are the part worth knowing about.** On the credit/debit inversion the model wrote:
+
+> *"…map to target fields 'credit' and 'debit' respectively, **as evidenced by their numeric values
+> (0 and 486933)**…"*
+
+One zero and one non-zero is consistent with *either* assignment. It matched on the name and described
+it as value-based reasoning. **Three separate scenarios produced that same confabulation**, which is
+the argument for never letting a rationale carry weight in a gate.
+
+### The fence failed this test first, and that is the finding
+
+On the first run the gates **accepted all ten mappings — including both wrong ones.** Zero
+discriminating power. One of them put **four real breaks through as clean**, taking in-remit false
+clear from 0/187 to 4/187 against an invariant that says it must be zero.
+
+Two of the five gates above exist because of that, and a third because of an adversarial review that
+went looking afterwards:
+
+| found | why every earlier gate missed it |
+|---|---|
+| **credit/debit inversion** | the sign check was **symmetric** — `not (credit > 0 and debit > 0)` is *preserved* by the swap, since a payment goes from credit>0/debit=0 to credit=0/debit>0. Fixed by asking *which* side, from `type` |
+| **amount/fees inversion** | `settlements` had one containment, `tax <= fees`, which a lakh-sized value in `fees` satisfies. Fixed with a second opinion from the other view — `fees` must equal the summed line-item fees |
+| **order_id/payment_id swap** | every gate was an assertion about a **row**. Nothing checked the **edges between** rows, and 40% of the exception queue vanished while `blocked_bad_mapping` read 0, the statement footed and linkage precision read 100.00% |
+
+That last one is worth sitting with: **three published safety signals read clean simultaneously while
+78 real breaks disappeared.** Linkage precision asks whether the links we *made* were right — it
+cannot ask whether the links we *should have made* were attempted, because an absent edge carries no
+evidence. What caught it was ground truth, which production does not have.
+
+After the fixes, replayed and re-run live: **8 correct mappings accepted, 0 correct mappings blocked,
+0 wrong mappings accepted, 2 wrong mappings blocked.**
+
+### What is still not claimed
+
+**That the fence generalises.** The last two gates were written specifically against the failures
+found, so catching them is true by construction. A mechanically enumerated fresh suite — every
+same-typed column pair, chosen by the schema rather than by us — is the measurement that would answer
+it, and it was **declined on time, not merit** (D-037), two days from the deadline.
+
+**That referential integrity is checked in general.** It is checked on two keys, at a rate, against
+views that loaded. `refund.payment_id` is deliberately **not** gated: it resolves for only **89.53%**
+of dev refunds because `REFUND_ORPHANED` is the declared blind spot, so a 90% floor would reject our
+own clean data (D-039).
+
+**That a swap we cannot see is impossible.** A column swap that keeps every key valid never fails
+validation, never quarantines, and so never reaches the repair path at all — every guard we have lives
+behind a quarantine (F-020). The fix is specified and was **not shipped** this close to the deadline
+(D-038).
 
 ### Determinism, and where it stops
 
@@ -604,5 +656,5 @@ src/recon/
 
 [PLAN.md](PLAN.md) — every decision and what it ruled out ·
 [RUN_LOG.md](RUN_LOG.md) — measured results per gate ·
-[FAILURE_LOG.md](FAILURE_LOG.md) — nineteen real incidents, dated as they happened ·
+[FAILURE_LOG.md](FAILURE_LOG.md) — twenty-two real incidents, dated as they happened ·
 [STUDY_PLAN.md](STUDY_PLAN.md)

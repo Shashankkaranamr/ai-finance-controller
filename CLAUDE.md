@@ -72,7 +72,9 @@ Tier 0 (exact-key joins, cardinality, flags, GST identity, **source-completeness
 **Tier 1** (full deduction stack typed against `domain/rates.py`, off-contract fee detection) ·
 **Tier 2** (exact-amount corroboration inside the posting window, every tie refused — D-027, D-033) ·
 **Tier 3** (LLM fenced to narration parsing, verifier gate, two rejection counters, cache) ·
-**schema repair** (LLM proposes a column mapping, four exact gates, `blocked_bad_mapping` — D-036) ·
+**schema repair** (LLM proposes a column mapping, **five** exact gates incl. containment and
+referential integrity, `blocked_bad_mapping` — D-036, D-039) · **10 pre-registered drift scenarios**
+measured live, 8/10 across three runs (`generate/drift.py`) ·
 faithful generator, dev + held-out eval · statement foots, journal entries post and balance · typed
 prioritised queue · audit log · determinism on both seeds · degraded mode on every run ·
 `README.md`, `ARCHITECTURE.md`, `VIDEO_SCRIPT.md`, architecture diagram.
@@ -83,12 +85,20 @@ Subset-sum search (**CUT**, D-016/D-027) · multi-gateway (**CUT** D-016; experi
 02 Sep, below) · second merchant (**CUT**) · FX (**CUT**) · TDS 194-O (out by persona) · any UI ·
 `draft_note` and rate-card extraction (designed, verifiers identified, deferred — D-036).
 
-**LLM accuracy is still not claimed.** Both jobs have now been run live exactly once —
-`parse_narration` on 01 Sep (22 narrations) and `map_schema` on 03 Sep (1 mapping, accepted first
-attempt). Those are smoke tests, not measurements: **n=1 for mapping**, and quoting "100%" from it
-would be quoting 1/1. Everything the project *claims* is about **the fence**, which is measured with
-test doubles (oracle, hostile, structurally invalid) and holds regardless of whether the model is
-right (D-022, D-036).
+**`map_schema` accuracy IS now measured; `parse_narration` accuracy is not.**
+
+* **`map_schema`: 8/10**, over ten pre-registered drift scenarios, live, **the same 8/10 across three
+  independent runs failing the same two scenarios** — a stable failure mode, not sampling noise. It
+  reads values well (seven opaque columns, three competing dates) and names badly (it believes a name
+  that lies, and writes rationales claiming value evidence it did not use — three separate instances).
+* **`parse_narration`: still not claimed.** One live run, 01 Sep, 22 narrations; the accuracy figure
+  worth quoting from it is *"5 of 8 where the UTR was actually present"*, not 5 of 22 (D-022).
+
+**What is still NOT claimed is that the FENCE generalises.** It accepted every wrong mapping on its
+first real test — zero discriminating power — and the three gates added since (F-021 ×2, F-022) were
+written against the specific failures found, so catching them is true by construction. The fresh
+mechanically-enumerated suite that would test generalisation was **declined on time, not merit**
+(D-037).
 
 ### The second-gateway experiment — closed 02 Sep, code stashed
 
@@ -267,7 +277,8 @@ src/recon/
   resolve/tier0.py       exact-key join + identity checking + source-completeness gating
   resolve/tier2.py       exact-amount corroboration inside the posting window (D-027)
   resolve/tier3.py       the fenced adjudicator: parse_narration + the verifier gate
-  resolve/schema_repair.py  map_schema: proposes a column mapping, four exact gates (D-036)
+  resolve/schema_repair.py  map_schema: a column mapping, five exact gates (D-036, D-039)
+  generate/drift.py      the 10 pre-registered drift scenarios + truth mappings
   resolve/pipeline.py    the run: load -> resolve -> measure -> close loop -> artifacts
   llm/client.py          Adjudicator protocol, cache, NullAdjudicator, LLMStats counters
   ledger/statement.py    footing statement + balanced journal entries
