@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from recon.generate import drift
 from recon.ingest.load import BANK_VIEW, LINES_VIEW
 from recon.llm.client import AdjudicationRequest, AdjudicationResult, NullAdjudicator
 from recon.resolve import pipeline
@@ -264,3 +265,73 @@ def test_rules_only_leaves_a_drifted_view_quarantined_and_honest(request, tmp_pa
     assert not [r for r in result.exceptions if r.code == "MISSING_BANK_CREDIT"]
     assert [r for r in result.exceptions if r.code == "SOURCE_VIEW_INCOMPLETE"]
     assert result.statement.foots
+
+
+# --- the two containments added by F-021's fix -------------------------------
+#
+# Both of these swaps were ACCEPTED by the live model on 03 Sep and accepted by the
+# fence behind it. They are the regression, and they use the pre-registered
+# scenario registry rather than a hand-rolled drift so the shapes cannot drift
+# apart from the ones that were actually measured.
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_a_credit_debit_inversion_is_blocked_by_the_asymmetric_sign_rule(
+        request, tmp_path, seed):
+    """F-021, S7. The symmetric rule `not (credit > 0 and debit > 0)` is preserved
+    BY the swap -- a payment goes from credit>0/debit=0 to credit=0/debit>0 and
+    still has exactly one non-zero side. Only asking WHICH side, via `type`,
+    separates them."""
+    scenario = drift.BY_NAME["S7_lines_credit_debit"]
+    data = drift.apply(scenario, _seed_dir(request, seed), tmp_path / f"s7_{seed}")
+    result = pipeline.run(data, tmp_path / f"out_s7_{seed}",
+                          adjudicator=Mapper(overrides={"credit_amount": "credit",
+                                                        "debit_amount": "debit"}))
+
+    assert result.llm.blocked_bad_mapping == 1
+    assert not result.repo.lines, "an inverted ledger reached the repository"
+
+    # A blocked repair must leave the run EXACTLY where no adjudicator would have.
+    # Asserting false_clear == 0 here would be wrong: with the view still
+    # quarantined it is legitimately high, because nothing was read. What must not
+    # happen is the accepted-wrong outcome, where the view loads INVERTED and four
+    # real breaks are reported clean.
+    rules_only = pipeline.run(data, tmp_path / f"out_s7_null_{seed}",
+                              adjudicator=NullAdjudicator())
+    assert (result.metrics.false_clear_in_remit.numerator
+            == rules_only.metrics.false_clear_in_remit.numerator)
+    assert (result.metrics.explanation_rate_bank.numerator
+            == rules_only.metrics.explanation_rate_bank.numerator)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_an_amount_fees_inversion_is_blocked_by_the_line_item_second_opinion(
+        request, tmp_path, seed):
+    """F-021, S9 -- predicted in writing before the run and still not caught.
+
+    `tax <= fees` passes comfortably once a lakh-sized value sits in `fees`. The
+    second opinion has to come from the other view: `fees` must equal the summed
+    line-item fees, and those two sides are independently sourced (D-003).
+    """
+    scenario = drift.BY_NAME["S9_settlements_swap"]
+    data = drift.apply(scenario, _seed_dir(request, seed), tmp_path / f"s9_{seed}")
+    result = pipeline.run(data, tmp_path / f"out_s9_{seed}",
+                          adjudicator=Mapper(overrides={"ref": "id"}))
+
+    assert result.llm.blocked_bad_mapping == 1
+    assert not result.repo.settlements
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_correct_mapping_for_both_is_still_accepted(request, tmp_path, seed):
+    """The control, and the one that matters most after tightening a gate: a
+    stricter fence that also rejects right answers is a wall."""
+    for name in ("S7_lines_credit_debit", "S9_settlements_swap"):
+        scenario = drift.BY_NAME[name]
+        src = _seed_dir(request, seed)
+        data = drift.apply(scenario, src, tmp_path / f"ok_{name}_{seed}")
+        truth = drift.truth_mapping(scenario, src)
+        result = pipeline.run(data, tmp_path / f"out_ok_{name}_{seed}",
+                              adjudicator=Mapper(overrides=truth))
+
+        assert result.llm.blocked_bad_mapping == 0, f"{name}: correct mapping rejected"
+        assert not result.repo.quarantined, f"{name}: correct mapping did not recover"

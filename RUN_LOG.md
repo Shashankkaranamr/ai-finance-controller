@@ -1915,3 +1915,83 @@ one that can is symmetric on exactly the pair that got swapped.
 **Not fixed in this entry, deliberately.** Fixing gate 3 and re-running would produce a different
 number, and the rule for this suite was one run, no re-rolls. The defect is recorded (F-021) and the
 fix is a decision to be taken with the result visible, not folded into it.
+
+---
+
+## F-021 fix, and the REGRESSION that confirms it · 03 Sep 2026
+
+**This is a regression, not a measurement.** The fix was written specifically to catch S7 and S9, so
+catching them is true by construction. What follows says the fix does what it was built to do. It
+says nothing about whether the fence discriminates on shapes it was not built against — that is the
+fresh-10 suite, declined on time under D-037.
+
+### The two containments added
+
+**A1 — the sign rule is now asymmetric, tied to `type`.** `not (credit > 0 and debit > 0)` is true and
+useless against the swap it looks like it should catch: a payment goes from credit>0/debit=0 to
+credit=0/debit>0 and still has exactly one non-zero side, so **the invariant is preserved by the very
+swap it exists to catch**. Asking *which* side rather than *how many* separates them, and `type`
+already said. Measured over both seeds before writing it:
+
+| type | dev | eval | constrained |
+|---|---|---|---|
+| `payment` | credit 1511, both-zero 48, **never debit** | credit 1556, both-zero 58 | debit must be 0 |
+| `refund` | debit 86 | debit 94 | credit must be 0 |
+| `transfer` | debit 29 | debit 29 | credit must be 0 |
+| `adjustment` | **debit 48 AND credit 10** | debit 42 AND credit 10 | **none — both legitimate** |
+
+A reserve is withheld as a debit and released as a credit, so `adjustment` pins no direction and
+constraining it would reject correct data. **Stated rather than smoothed: this covers the types that
+carry a direction — ~96% of rows — and a swap confined entirely to adjustment lines would still pass.**
+
+**A2 — `settlements` gains a second opinion from the other view.** `tax <= fees` was the only
+containment available, because `amount` is signed and cannot be bounded in-row, and a lakh-sized value
+dropped into `fees` satisfies it comfortably. `fees` must equal the summed line-item fees, and those
+two sides are **independently sourced** (D-003): `settlements.jsonl` reports the total,
+`settlement_lines.jsonl` carries the parts. Measured **22/22 exact on both seeds**, and an inverted
+`fees` misses by three orders of magnitude.
+
+Skipped for any settlement whose lines are absent — a check that cannot run has not passed, which is
+the same rule F-018 was about.
+
+### The regression: the 03 Sep mappings replayed against the fixed gates
+
+Replayed rather than re-run live, deliberately. A fresh live run would confound the gate change with
+model sampling variance; replaying the **exact** mappings the model returned isolates the one thing
+that changed. Offline, deterministic, no key.
+
+| scenario | model | gate was | gate now | false clear |
+|---|---|---|---|---|
+| S1–S6, S8, S10 | correct | accepted | **accepted** | 0/187 |
+| **S7** | wrong | accepted | **BLOCKED** | 180/187 |
+| **S9** | wrong | accepted | **BLOCKED** | 6/187 |
+
+| the 2×2 | before | after |
+|---|---|---|
+| correct + accepted | 8 | **8** |
+| correct + BLOCKED *(fence too strict)* | 0 | **0** |
+| **wrong + ACCEPTED** *(dangerous)* | **2** | **0** |
+| wrong + blocked *(fence worked)* | 0 | **2** |
+
+**Read the false-clear column carefully — 180/187 is not damage.** A blocked repair leaves the view
+quarantined, and false clear is then legitimately high because nothing was read. Confirmed identical
+to a rules-only run on the same drifted input: S7 180/187, S9 6/187, explanation 0 in both. The
+outcome that mattered — a view loading *inverted* and reporting four real breaks as clean — no longer
+happens. A test asserts the equality rather than the number, so it survives a re-generation.
+
+### Gate conditions
+
+**377 tests** (371 → 377: six new, both containments across both seeds plus the control that a correct
+mapping is still accepted — a stricter fence that also rejects right answers is a wall).
+`metrics.json` **byte-identical on both seeds** against the pre-Part-1 baseline, and byte-identical
+across two runs of the same seed. False clear **0/195 dev, 0/187 eval** on the shipped path.
+
+### What is deliberately still true
+
+**8/10 remains the published model accuracy.** The fix changes the fence, not the model, and nothing
+about the 03 Sep measurement is revised. **The gates having had zero discriminating power on that
+suite also stands as published** — it was true when measured, and the fix closing two named holes does
+not make it retrospectively false.
+
+Both declines are recorded as decisions rather than omissions: **D-037** (fresh-10 suite) and
+**D-038** (F-020's fix specified, not shipped).

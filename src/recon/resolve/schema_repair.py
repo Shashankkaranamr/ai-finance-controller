@@ -28,10 +28,11 @@ the proposal is a mapping, and it must survive four gates, all exact:
      One row short and the mapping is rejected, because a mapping that works for
      some rows is a mapping we do not understand.
   3. CONTAINMENT -- the structural facts a column must satisfy to still BE that
-     column (tax <= fee, fee <= amount, ...). This catches the dangerous case gate
-     2 cannot: two fields of the SAME TYPE swapped, which re-validates perfectly
-     and is arithmetically nonsense. See `_identity_holds` for why this is
-     containment and deliberately NOT the GST rate.
+     column (tax <= fee, fee <= amount, the side of the ledger its `type` moves,
+     ...). This catches the dangerous case gate 2 cannot: two fields of the SAME
+     TYPE swapped, which re-validates perfectly and is arithmetically nonsense.
+     See `_identity_holds` for why this is containment and deliberately NOT the
+     GST rate, and why the sign rule had to become asymmetric (F-021).
   4. IDENTITY -- the column mapped to the view's primary key must actually be
      unique. Catches a `bank_ref`/`narration` swap when a narration repeats, which
      it does on realistic volumes. DATA-DEPENDENT, not exact -- see `_is_useful`.
@@ -41,8 +42,9 @@ fence:
 
   settlement_lines   strongest: four independent containments, and a fee/tax swap
                      breaks them on every fee-bearing row at once.
-  settlements        fee/tax containment only -- `amount` is signed here, because
-                     a heavy-refund cycle settles negative.
+  settlements        two: fee/tax containment, plus `fees` against the summed
+                     line-item fees -- an independently sourced second opinion,
+                     because `amount` is signed and cannot be bounded in-row.
   bank               no money identity at all: a credit is one number. Gate 4
                      carries this view instead.
   books              none. Gates 1, 2 and 4 only, stated rather than papered over.
@@ -86,7 +88,30 @@ def _required_fields(model) -> set[str]:
     return {name for name, spec in model.model_fields.items() if spec.is_required()}
 
 
-def _identity_holds(view: str, rows: list) -> bool:
+# Which side of the ledger each line type moves. `None` means both are legitimate
+# and nothing can be asserted -- an adjustment withholds a reserve as a debit and
+# releases it as a credit, so a rule here would reject correct data.
+SIDE_FOR_TYPE: dict[str, str | None] = {
+    "payment": "credit",
+    "refund": "debit",
+    "transfer": "debit",
+    "adjustment": None,
+}
+
+
+def _moves_the_right_way(row) -> bool:
+    """A line of this `type` may not move money in the other direction.
+
+    Zero on both sides is allowed and is not a swap tell: an on-hold payment is
+    captured and never settled, so it moves nothing (48 dev / 58 eval rows).
+    """
+    side = SIDE_FOR_TYPE.get(row.type)
+    if side is None:
+        return True
+    return row.debit == 0 if side == "credit" else row.credit == 0
+
+
+def _identity_holds(view: str, rows: list, repo: Repository) -> bool:
     """Gate 3: CONTAINMENT, deliberately not the GST rate.
 
     THE DISTINCTION THIS GATE TURNS ON, WHICH COST A REWRITE TO SEE
@@ -113,17 +138,72 @@ def _identity_holds(view: str, rows: list) -> bool:
     fee/tax swap breaks containment on ALL 890 (dev) and 885 (eval) fee-bearing
     rows at once. Exact, total, and blind to whether the money itself was right.
 
+    WHY THE SIGN RULE IS ASYMMETRIC, AND WHY THE SYMMETRIC ONE WAS NOT ENOUGH
+    -------------------------------------------------------------------------
+    `not (credit > 0 and debit > 0)` is true and useless against the swap it looks
+    like it should catch. A payment has credit > 0, debit = 0; exchange the two
+    columns and it has credit = 0, debit > 0 -- still exactly one non-zero side.
+    **The invariant is preserved by the very swap it exists to catch**, and a
+    live model's credit/debit inversion was accepted because of it (F-021).
+
+    The fix is to ask WHICH side, not how many. `type` already says, and the gate
+    never consulted it. Measured over both seeds:
+
+        payment    credit 1511/1556, both-zero 48/58, debit NEVER
+        refund     debit 86/94, always
+        transfer   debit 29/29, always
+        adjustment debit 48/42 AND credit 10/10  -- both are legitimate
+
+    So three of the four types pin a direction and `adjustment` pins none -- a
+    reserve is withheld as a debit and released as a credit, and constraining it
+    would reject correct data. Stated rather than smoothed over: this gate covers
+    the types that carry a direction, which on this data is ~96% of rows, and a
+    swap confined entirely to adjustment lines would pass.
+
     Returns True when the view carries no such invariant -- an ABSENT check, not a
     pass we did not earn. The caller records which gate ran.
     """
     if view == LINES_VIEW:
         return all(r.tax <= r.fee and r.fee <= r.amount and r.amount > 0
                    and not (r.credit > 0 and r.debit > 0)
+                   and _moves_the_right_way(r)
                    for r in rows)
     if view == SETTLEMENTS_VIEW:
-        # `amount` is signed here -- a heavy-refund cycle settles negative -- so
-        # only the fee/tax containment is available, and it is enough.
-        return all(r.tax <= r.fees for r in rows)
+        # `amount` is signed here -- a heavy-refund cycle settles negative -- so it
+        # cannot be bounded from inside the row. That left ONE containment,
+        # `tax <= fees`, and a lakh-sized value dropped into `fees` satisfies it
+        # comfortably: exactly how a live amount/fees inversion was accepted
+        # (F-021, S9, predicted in writing and still not caught).
+        #
+        # The second opinion comes from the OTHER VIEW. `fees` must equal the sum
+        # of the line items' fees, and those two sides are independently sourced
+        # (D-003) -- settlements.jsonl reports the total, settlement_lines.jsonl
+        # carries the parts. Measured: 22/22 exact on both seeds, and an inverted
+        # `fees` misses by three orders of magnitude.
+        if not all(r.tax <= r.fees for r in rows):
+            return False
+        return _fees_agree_with_line_items(rows, repo)
+    return True
+
+
+def _fees_agree_with_line_items(rows: list, repo: Repository) -> bool:
+    """`settlements.fees` against the sum of that settlement's line-item fees.
+
+    Skipped for any settlement whose lines are not present. That is not
+    leniency -- it is the same rule as everywhere else here: a check that cannot
+    be run has not passed, and asserting on rows we do not have would be the
+    absence-as-evidence error F-018 was about. When the line view itself is the
+    one being repaired, this contributes nothing and `tax <= fees` stands alone.
+    """
+    by_settlement = repo.lines_by_settlement()
+    if not by_settlement:
+        return True
+    for row in rows:
+        members = by_settlement.get(row.id)
+        if not members:
+            continue
+        if row.fees != sum(int(m.fee) for m in members):
+            return False
     return True
 
 
@@ -276,7 +356,7 @@ def repair(data_dir: Path, repo: Repository, adjudicator: Adjudicator,
             continue
 
         mapping = result.data.get("mapping")
-        failed_gate = _verify(view, model, mapping, samples, observed)
+        failed_gate = _verify(view, model, mapping, samples, observed, repo)
         if failed_gate is not None:
             stats.blocked_bad_mapping += 1
             audit.record("blocked_bad_mapping", source_file=view, gate=failed_gate,
@@ -294,7 +374,7 @@ def repair(data_dir: Path, repo: Repository, adjudicator: Adjudicator,
     return repo
 
 
-def _verify(view, model, mapping, samples, observed) -> str | None:
+def _verify(view, model, mapping, samples, observed, repo) -> str | None:
     """Run the four gates in order. Returns the gate that failed, or None.
 
     Named rather than boolean: `blocked_bad_mapping` is a number we intend to
@@ -325,7 +405,7 @@ def _verify(view, model, mapping, samples, observed) -> str | None:
             return "revalidation:row_rejected"
 
     # --- gate 3: identity -----------------------------------------------------
-    if not _identity_holds(view, repaired):
+    if not _identity_holds(view, repaired, repo):
         return "identity:sec_3_2_violated"
 
     # --- gate 4: utility ------------------------------------------------------

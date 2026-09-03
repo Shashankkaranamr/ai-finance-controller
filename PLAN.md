@@ -1080,3 +1080,51 @@ asks whether a column is still what it claims to be, never whether the money was
 **Supersedes:** Narrows D-016 (which stands for every job inside the matcher). Does not affect D-022:
 with no API key, the fence and the ablation are measured and **real-model mapping accuracy is claimed
 nowhere**.
+
+### D-037 · F-021 response · 2026-09-03 · The fresh-10 scenario suite is DECLINED, not deferred
+**Decision:** F-021's containment fixes ship and are confirmed by **replaying the 03 Sep live
+mappings** against the new gates. A **second, mechanically enumerated suite of 10 fresh drift
+shapes** — the measurement that would show whether the fence generalises — is **declined**.
+**Why:** The replay is a regression and is labelled one everywhere it appears. It answers "does the
+fix do what it was built to do" and the answer is yes: the dangerous cell went 2 → 0 with no correct
+mapping newly blocked. It cannot answer "does the fence discriminate on shapes it was not built
+against", because the fix was written specifically against S7 and S9 and catching them is true by
+construction.
+
+Only a fresh suite answers that, and it has to be **mechanically enumerated** — every same-typed
+column pair per view, taken from the schema — because having seen the fix, any hand-picked sample
+would be chosen, however unconsciously, from shapes the fix handles. Estimated 2h 20m.
+
+It is declined on **time, not merit, and not on doubt about its value**: it is the single most
+informative thing left on the list. Two days remain, the video is unrecorded, and Increment 6 was
+scoped at two protected days. Spending a quarter of the remaining engine time to improve the
+*precision* of a finding that is already measured, published and honest is the wrong trade.
+**What it rules out:** Any claim that the fence generalises. The publishable claim stays exactly what
+was measured on 03 Sep — **8/10 model accuracy, and gates that had zero discriminating power on that
+suite** — with the fix recorded as closing the two specific holes it found. Nobody may quote the
+replay as evidence the fence is now sound; it is evidence that two named holes are shut.
+**Supersedes:** —
+
+---
+
+### D-038 · F-021 response · 2026-09-03 · F-020's fix is SPECIFIED and NOT SHIPPED
+**Decision:** Containment is **not** extended to views that load successfully. F-020 — a pure column
+swap validates cleanly, never quarantines, and therefore never reaches schema repair — stands as a
+recorded, open finding with its fix designed and unbuilt.
+**Why:** The fix is real and it is known: run the containment checks at ingest on every view, not
+only on repaired ones. Measured reassurance exists — every containment holds on 100% of rows on both
+seeds, so a clean run would be unaffected and `metrics.json` would stay byte-identical.
+
+But it **changes what the pipeline asserts on every run**, and it carries a design question with no
+default answer: what happens when a view that loaded cleanly fails containment? A new exception type,
+a quarantine of a file that parsed, or an informational flag are three different products. Answering
+that two days from a deadline, on the submission's most load-bearing path, is how a project ships a
+regression it has no time left to find.
+
+The same reasoning as D-024, and as the multi-gateway cut: a change declined on time is a decision,
+and a change rushed under deadline is an accident waiting to be discovered by a reviewer.
+**What it rules out:** Claiming the system detects mis-columned data in general. It does not. It
+detects mis-columned data **that failed validation first**, and F-020 says plainly that every guard
+we have lives behind a quarantine, so data that never quarantines is unguarded. That sentence ships
+in the failure log rather than being softened.
+**Supersedes:** —

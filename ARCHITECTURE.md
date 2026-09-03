@@ -14,7 +14,7 @@ pip install -e ".[dev]"          # pydantic + pytest, nothing else
 python -m recon demo             # dev seed, ~50 s from a cold clone
 python -m recon eval             # the held-out seed
 python -m recon ablation --seed eval
-pytest                           # 263 tests
+pytest                           # 377 tests
 ```
 
 No network, no API key, no `make`, no `uv`. The LLM is opt-in (`--llm`).
@@ -240,7 +240,7 @@ unreliable. That is the design.
 Job 1's gate is an exact lookup: a UTR resolves or it does not. Job 2's proposal is a *mapping*, and
 it must survive four gates — structural (no invented field names, injective, required fields covered),
 total re-validation (**every** quarantined row through the same Pydantic model, not most), containment,
-and utility (the repaired view must still serve its join).
+and identity (the column mapped to the primary key must actually be unique).
 
 **Containment is the interesting one.** The obvious check is the GST identity — tax is 18% of the MDR
 base. Measuring rejected it immediately: it fails on **17 of 890** fee-bearing dev rows and **13 of

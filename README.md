@@ -34,7 +34,7 @@ seen.** Every figure below is reproduced by `python -m recon demo` and `python -
 | **Reconciliation statement** | **foots to zero** | **foots to zero** |
 | Throughput | 3,326 records in ~0.4 s | 3,434 records in ~0.4 s |
 | Determinism | byte-identical `metrics.json` across two runs, a regeneration **and a fresh clone** | same |
-| Tests | **263**, green on a clean clone with `data/` absent | — |
+| Tests | **377**, green on a clean clone with `data/` absent | — |
 
 ### The ablation — what each tier is actually worth
 
@@ -124,7 +124,7 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 263 tests
+pytest                                              # 377 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
@@ -449,8 +449,8 @@ ground truth, because a model told what would make an answer verify can write to
 |---|---|
 | **Structural** | a field name that does not exist, a non-injective mapping, required fields unmapped — the analogue of refusing an invented UTR |
 | **Total re-validation** | any mapping under which even one quarantined row fails Pydantic, `extra="forbid"` still enforced. Not most rows. All of them |
-| **Containment** | a mapping that type-checks and is arithmetic nonsense — `tax > fee`, `fee > amount`, a line moving money both ways |
-| **Utility** | a mapping that validates but leaves the view unable to serve its join, e.g. `bank_ref` swapped with `narration` |
+| **Containment** | a mapping that type-checks and is arithmetic nonsense — `tax > fee`, `fee > amount`, a line moving money the wrong way for its `type`, a settlement whose `fees` disagree with its own line items |
+| **Identity** | a mapping that sends the wrong column to the primary key, collapsing it — caught when the displaced column repeats |
 
 **The containment gate is the one worth explaining, because the obvious version of it was wrong.**
 The natural check is the GST identity — tax is 18% of the MDR base. Measuring killed it: it fails on
