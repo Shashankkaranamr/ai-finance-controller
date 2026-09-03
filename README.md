@@ -544,7 +544,11 @@ it, and it was **declined on time, not merit** (D-037), two days from the deadli
 **That referential integrity is checked in general.** It is checked on two keys, at a rate, against
 views that loaded. `refund.payment_id` is deliberately **not** gated: it resolves for only **89.53%**
 of dev refunds because `REFUND_ORPHANED` is the declared blind spot, so a 90% floor would reject our
-own clean data (D-039).
+own clean data (D-039). That exclusion is exploitable and we measured it rather than leaving it as a
+caveat: a deliberate `payment_id` swap takes in-remit false clear to **2.14% (4/187)** against
+**0.00%** on every shipped path, with the edge set, linkage precision and all 85 refund links intact
+— two orders of magnitude below the 41.71% the gated key reached before F-022, and disclosed here
+rather than left for a reviewer to find.
 
 **That a swap we cannot see is impossible.** A column swap that keeps every key valid never fails
 validation, never quarantines, and so never reaches the repair path at all — every guard we have lives

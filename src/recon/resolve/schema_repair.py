@@ -499,8 +499,27 @@ def _verify(view, model, mapping, samples, observed, repo) -> str | None:
 
 
 def _render(mapping) -> str:
+    """The mapping as it goes into the audit log. A well-formed one is NOT truncated.
+
+    It used to cut every mapping at 200 characters, which is about eight of the
+    twenty-six entries a `settlement_lines` mapping carries. That made the audit
+    record unreplayable: `map_schema_accepted` named the view and the row count,
+    and then showed a prefix of the decision it was recording. Reconstructing what
+    the model actually proposed meant re-running it and hoping for the same sample.
+
+    An append-only decision log exists so a decision can be re-derived from it
+    alone (INVARIANT: `audit/log.py`, run_id as the idempotency key). A record that
+    holds part of the decision does not meet that bar, and the field it truncates
+    is the only part a replay needs.
+
+    A NON-dict is still bounded, and the asymmetry is deliberate. A dict has
+    already passed `json.loads` and gate 1, so its size is set by the schema --
+    bounded by construction. Anything else is a malformed model response of
+    unknown length arriving on the error path, and the log should not be the place
+    that discovers there is no limit to it.
+    """
     if isinstance(mapping, dict):
-        return json.dumps(mapping, sort_keys=True, separators=(",", ":"))[:200]
+        return json.dumps(mapping, sort_keys=True, separators=(",", ":"))
     return str(mapping)[:200]
 
 
