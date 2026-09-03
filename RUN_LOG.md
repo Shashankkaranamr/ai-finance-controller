@@ -1789,3 +1789,129 @@ when the prediction was written. **The prediction stands as written** — if S9 
 the prediction being wrong in the direction that flatters us, and it will be reported that way.
 
 371 tests. `metrics.json` byte-identical on both seeds. Still no live call made.
+
+---
+
+## RESULT — map_schema scenario suite, live · 03 Sep 2026
+
+Ten scenarios, held-out seed, `claude-haiku-4-5`, **one call each, no re-rolls**, against the
+pre-registration written earlier the same day. Reported exactly as returned.
+
+### The headline: 8/10 correct, and the fence did not hold
+
+| | measured |
+|---|---|
+| **Model accuracy** | **8 of 10** mappings exactly correct |
+| correct + accepted | **8** |
+| correct + BLOCKED *(fence too strict)* | **0** |
+| **wrong + ACCEPTED** *(the dangerous cell)* | **2** — S7, S9 |
+| wrong + blocked *(fence worked)* | **0** |
+
+**The fence caught nothing, because it had nothing to catch except the two things it cannot see.**
+Every mapping the model got right was accepted, and **every mapping it got wrong was also accepted.**
+On this suite the gates had zero discriminating power.
+
+### Per scenario
+
+| # | shape | view | model | gate | run == clean | ms |
+|---|---|---|---|---|---|---|
+| S1 | single obvious | bank | **correct** | accepted | yes | 2428 |
+| S2 | single obvious | lines | **correct** | accepted | yes | 3721 |
+| S3 | single ambiguous | settlements | **correct** | accepted | yes | 1982 |
+| S4 | single ambiguous | lines | **correct** | accepted | yes | 2375 |
+| S5 | multiple (3) | bank | **correct** | accepted | yes | 1738 |
+| S6 | multiple (3) | lines | **correct** | accepted | yes | 3596 |
+| **S7** | misleading | lines | **WRONG** | **accepted** | **NO** | 2748 |
+| S8 | misleading | books | **correct** | accepted | yes | 2002 |
+| **S9** | misleading | settlements | **WRONG** | **accepted** | **NO** | 2039 |
+| S10 | opaque, all 7 | books | **correct** | accepted | yes | 2174 |
+
+### The damage, measured
+
+For an accepted mapping the question is whether the repaired run returns to the clean baseline
+(18/23, false clear 0/187, precision 100%). Eight did, exactly. Two did not:
+
+| | explanation | false clear, in remit | linkage precision |
+|---|---|---|---|
+| clean baseline | 18/23 | **0/187** | 100.00% |
+| **S7 repaired** | **0/23** | **4/187** | 100.00% |
+| **S9 repaired** | **0/23** | 0/187 | 100.00% |
+
+**S7 put four real breaks through as clean.** Invariant 10 says in-remit false clear must be zero, and
+on a repaired view it was not. Linkage precision held at 100% in both cases — nothing wrong was
+*linked* — but "we linked nothing wrong" is a much weaker claim than the one this project makes.
+
+### Both failures are the same failure: the model reads names first, values second
+
+**S7** — the file carries `credit_amount` (holding the true *debit* values) and `debit_amount`
+(holding the true *credit* values). The model returned the name match:
+
+```
+credit_amount -> credit    (truth: debit)
+debit_amount  -> debit     (truth: credit)
+```
+
+Its stated reason is the part worth reading twice:
+
+> *"…map to target fields 'credit' and 'debit' respectively, **as evidenced by their numeric values
+> (0 and 486933)** representing transaction components…"*
+
+**It cited value evidence for a conclusion the values do not determine.** Seeing one zero and one
+non-zero is consistent with either assignment; the rationale asserts the name-based answer and
+dresses it as value-based reasoning. A rationale is not a record of how an answer was reached, and
+this is the cleanest example of that we have.
+
+**S9** — exactly as pre-registered. The model mapped `ref`→`id` correctly, then:
+
+> *"…all other columns match their target field names directly."*
+
+which is precisely the trap: `amount` and `fees` are real field names holding each other's values.
+
+### Why the gates let both through — and these are two distinct defects
+
+**S7 defeated containment because our credit/debit invariant is SYMMETRIC.** The check is
+`not (credit > 0 and debit > 0)` — a line moves money one way. A payment has credit > 0, debit = 0;
+after the swap it has credit = 0, debit > 0. **Still exactly one non-zero side.** The invariant is
+preserved by the very swap it should catch. This is a real defect in gate 3 and it was not predicted.
+
+**S9 defeated containment exactly as predicted.** `settlements` has one containment, `tax <= fees`,
+because `amount` is signed. With a lakh-sized value now in `fees`, `tax <= fees` passes comfortably.
+The pre-registration named this case and named the reason.
+
+Gate 4 (key uniqueness) fired on neither: S7 leaves `entity_id` untouched and S9 maps `ref`→`id`
+correctly, so both keys stay unique.
+
+### Scored against the prediction
+
+| predicted | measured | |
+|---|---|---|
+| **7 of 10 correct** | **8 of 10** | wrong, and in the direction that flatters us |
+| failures at **S10, S9, S4** | failures at **S7, S9** | 1 of 3 named correctly |
+| S10 (seven opaque columns) fails | **correct** | wrong — it mapped all seven from values alone |
+| S4 (three date fields) fails | **correct** | wrong — it ordered them correctly |
+| S7 correct | **WRONG** | wrong, and it is one of the two that did damage |
+| **at least one wrong mapping ACCEPTED** | **two were** | **confirmed** |
+| false clear unmoved unless the dangerous cell fills | **it filled; false clear moved to 4/187** | confirmed, in the bad direction |
+
+**The falsifiable core was right and the accuracy estimate was wrong in both directions at once.** I
+over-estimated the difficulty of value-only inference — S10 and S4 were the two I was most confident
+would fail, and the model handled both — and I under-estimated how strongly a *misleading name*
+dominates a correct value. S7 was on my "expect correct" list because I reasoned the zero/non-zero
+values would disambiguate. They do disambiguate, for anyone who looks. The model said it looked.
+
+### What this changes
+
+**The n=1 result on 03 Sep now reads differently.** That run was S2, which is on the easy end of this
+suite, and "the first live call returned a correct mapping" was true and unrepresentative. The number
+to quote is **8/10, with 2 wrong mappings accepted**, and it should be quoted with the failure mode
+attached, because 8/10 on its own reads as a better result than this is.
+
+**The honest one-line summary: the model is good at this and our fence is not.** Where a column's
+name is absent, generic or opaque, it reads the values and gets it right — including seven opaque
+columns at once. Where the name actively lies, it believes the name, and our containment checks were
+built without a case that lies. Two of the four gates are structural and cannot see a value swap; the
+one that can is symmetric on exactly the pair that got swapped.
+
+**Not fixed in this entry, deliberately.** Fixing gate 3 and re-running would produce a different
+number, and the rule for this suite was one run, no re-rolls. The defect is recorded (F-021) and the
+fix is a decision to be taken with the result visible, not folded into it.

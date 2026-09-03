@@ -626,3 +626,109 @@ This is the fourth instance in three days of the same underlying shape as F-016,
 component behaving correctly in isolation while contradicting, or silently failing to honour, what
 another component had already established. F-018's rule was *a count is a diagnostic, not a control*.
 This one's is that **a counter is only evidence about the thing it names.**
+
+---
+
+### F-020 · 03 Sep 2026 · Ingest cannot see a column swap at all, and schema repair never gets the chance
+
+**What broke.** Nothing, visibly — which is the problem. Swapping the values of two same-typed
+columns produces a file that **passes validation cleanly**. Found while building scenario S9, before
+any of it ran:
+
+```
+settlements.jsonl, amount and fees exchanged:
+  amount now holds 218683 (was fees), fees now holds 17983537 (was amount)  -> row validates
+```
+
+**Cause.** `extra="forbid"` is a check on *names*. It catches a key it does not recognise; it has
+nothing to say about a key it recognises holding the wrong value. Every key stays valid, nothing
+quarantines — and `map_schema` only ever sees quarantined rows, so **the repair path is never
+entered**. The inverted view flows straight into Tier 0 and posts.
+
+This is strictly worse than the F-018 cascade it resembles. There, the batch made loud false claims
+and we could see them. Here the run looks completely normal.
+
+**Recovery.** None available at this layer, and saying so is the finding. A column swap is invisible
+to a schema check by construction; catching it needs an *arithmetic* opinion about what a column
+should contain — which is what schema repair's containment gate is, except that gate only ever runs
+on views that already failed to load. **The two mechanisms are on opposite sides of a door that a
+swap walks straight past.**
+
+S9 was amended to add a third rename that forces quarantine, so the swap could still be tested
+through the repair path. That is a scaffold for the experiment, not a fix for this.
+
+**Standing consequence.**
+
+> **Validation proves a file has the right shape. It says nothing about whether the values are in the
+> right columns, and no amount of stricter validation will.** Every guard we have against
+> mis-columned data lives behind a quarantine, so data that never quarantines is unguarded.
+
+Recorded as open. Closing it means running the containment checks on views that loaded *successfully*,
+not only on repaired ones — cheap to do and a real change in what the pipeline asserts, so it is a
+decision rather than a patch.
+
+---
+
+### F-021 · 03 Sep 2026 · The containment gate is symmetric on the one pair that got swapped
+
+**What broke.** In the 10-scenario live run, **two wrong mappings were accepted** and one of them put
+**four real breaks through as clean** — in-remit false clear on a repaired view went from 0/187 to
+**4/187**, against an invariant that says it must be zero.
+
+| | explanation | false clear, in remit |
+|---|---|---|
+| clean baseline (eval) | 18/23 | 0/187 |
+| **S7 repaired on a wrong mapping** | **0/23** | **4/187** |
+| **S9 repaired on a wrong mapping** | **0/23** | 0/187 |
+
+**Cause 1 — S7, and it was not predicted.** `settlement_lines` carries four containments, and the one
+that should have caught a credit/debit swap is:
+
+```python
+not (r.credit > 0 and r.debit > 0)     # a line moves money one way
+```
+
+It is **symmetric**. A payment has `credit > 0, debit = 0`; after the swap it has `credit = 0,
+debit > 0`. Still exactly one non-zero side, so **the invariant is preserved by the very swap it
+exists to catch**. The gate was written by asking "what must be true of a line item" and never by
+asking "what would a wrong mapping look like" — and those turn out to be different questions.
+
+**Cause 2 — S9, and it was predicted in writing beforehand.** `settlements` has exactly one
+containment, `tax <= fees`, because `amount` is signed and cannot be bounded. Put a lakh-sized value
+in `fees` and `tax <= fees` passes comfortably. The pre-registration named this scenario, named the
+mechanism, and predicted the acceptance.
+
+Gate 4 (key uniqueness) fired on neither: S7 leaves `entity_id` untouched, S9 maps `ref`→`id`
+correctly. Gates 1 and 2 are structural and cannot see a value in the wrong column at all.
+
+**The model's half of it, recorded because it is about rationales rather than accuracy.** S7's stated
+reason claimed evidence it did not have:
+
+> *"…map to target fields 'credit' and 'debit' respectively, as evidenced by their numeric values
+> (0 and 486933)…"*
+
+One zero and one non-zero is consistent with **either** assignment. The rationale asserts the
+name-based answer and presents it as value-based reasoning. A rationale is a fluent output, not a
+record of how the answer was reached, and nothing in the fence should ever weigh one.
+
+**Recovery.** **Not applied.** The suite was pre-registered as one run with no re-rolls, and fixing
+the gate would change the number it produced. The defect is recorded with the result visible so the
+fix is a decision taken in the open rather than folded into the measurement.
+
+What the fix would be, for when that decision is taken: containment for `credit`/`debit` has to be
+**asymmetric and tied to `type`** — a `payment` line credits, a `refund` line debits — which is
+information the schema already carries and the gate never consulted. `settlements` needs a second
+containment that does not depend on `amount` being unsigned; comparing `fees` against the summed
+line-item fees is available and independently sourced.
+
+**Standing consequence, and it is the one that generalises past this module.**
+
+> **An invariant written to describe correct data will not necessarily reject incorrect data.** The
+> containment gate was derived by asking what must be true of a valid row. A verifier has to be
+> derived from the other end: what would a *wrong* answer look like, and does anything here forbid it.
+
+Measured on this suite, the gates had **zero discriminating power** — every correct mapping was
+accepted and every wrong one was too. A fence with a 100% pass rate on a set containing known-bad
+inputs is not a fence yet, and the only reason we know that is that the scenarios carried ground
+truth. That is the argument for scoring `model_correct` and `gate_outcome` separately, and it is why
+this run was worth more than the n=1 that preceded it.
