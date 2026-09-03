@@ -32,9 +32,9 @@ the proposal is a mapping, and it must survive four gates, all exact:
      2 cannot: two fields of the SAME TYPE swapped, which re-validates perfectly
      and is arithmetically nonsense. See `_identity_holds` for why this is
      containment and deliberately NOT the GST rate.
-  4. UTILITY -- the repaired view must actually serve the join it exists for. A
-     bank statement whose narration has been swapped with its row id validates
-     fine and yields not one readable reference.
+  4. IDENTITY -- the column mapped to the view's primary key must actually be
+     unique. Catches a `bank_ref`/`narration` swap when a narration repeats, which
+     it does on realistic volumes. DATA-DEPENDENT, not exact -- see `_is_useful`.
 
 Gate 3's strength VARIES BY VIEW, and claiming otherwise would overstate the
 fence:
@@ -45,7 +45,11 @@ fence:
                      a heavy-refund cycle settles negative.
   bank               no money identity at all: a credit is one number. Gate 4
                      carries this view instead.
-  books              none. Gates 1 and 2 only, stated rather than papered over.
+  books              none. Gates 1, 2 and 4 only, stated rather than papered over.
+
+Gate 4 applies to ALL FOUR views, which it did not before 03 Sep -- it asked the
+bank view alone whether a UTR resolved, and that made it a test of our regex
+rather than of the mapping. See `_is_useful`.
 
 WHAT IS NEVER SENT
 ------------------
@@ -60,7 +64,6 @@ import json
 from pathlib import Path
 
 from ..audit.log import AuditLog
-from ..generate.narration import parse_utr
 from ..ingest.load import (BANK_VIEW, BOOKS_VIEW, LINES_VIEW, SETTLEMENTS_VIEW,
                            QuarantinedRow, Repository)
 from ..ingest.schemas import (BankCreditRow, BookEntryRow, SettlementLineRow,
@@ -124,19 +127,66 @@ def _identity_holds(view: str, rows: list) -> bool:
     return True
 
 
-def _is_useful(view: str, rows: list, repo: Repository) -> bool:
-    """Gate 4. Only the bank view has a non-trivial answer, and it is the one
-    that needs one: `bank_ref` and `narration` are both strings, so swapping them
-    re-validates cleanly, satisfies every identity (there is none), and leaves a
-    statement from which no reference can be read."""
-    if view != BANK_VIEW:
+# Every view has exactly one column that IDENTIFIES its rows -- the field the
+# repository keys its dict on. If a mapping sends the wrong column there, the view
+# stops being addressable and rows silently overwrite each other.
+IDENTITY_FIELD = {
+    BOOKS_VIEW: "order_id",
+    LINES_VIEW: "entity_id",
+    SETTLEMENTS_VIEW: "id",
+    BANK_VIEW: "bank_ref",
+}
+
+
+def _is_useful(view: str, rows: list) -> bool:
+    """Gate 4: the column mapped to the identity field must actually identify.
+
+    WHAT THIS ASKED BEFORE, AND WHY IT WAS WRONG
+    ---------------------------------------------
+    It used to require that some repaired bank narration parse to a UTR resolving
+    to a known settlement. That is not a property of the MAPPING -- it is a
+    property of whether our regex can read this seed's narration families, which
+    is the exact gap Tier 3 exists for. Measured: dev parses 23 of 23 and 21
+    resolve, so the gate waved everything through; **eval parses 2 of 23 and 0
+    resolve, so it blocked every bank mapping however correct it was.**
+
+    Strictest on the held-out seed, for a reason that has nothing to do with the
+    answer. Found by the stub harness on 03 Sep before any live call, which is the
+    only reason it did not become 2 of 10 published scenarios scored as fence
+    rejections of a right answer.
+
+    A primary key must be unique. That is a real invariant, it is checkable
+    exactly, and it applies to all four views rather than one -- so it is a
+    straight improvement on what it replaces.
+
+    WHAT IT DOES NOT DO, STATED RATHER THAN ASSUMED
+    ------------------------------------------------
+    It is DATA-DEPENDENT, not exact, and the difference matters. It catches a
+    `bank_ref`/`narration` swap only when some narration REPEATS, because that is
+    what collapses the key. Measured:
+
+        dev  88d: 23 credits, 22 distinct narrations -> swap CAUGHT
+        eval 88d: 23 credits, 22 distinct narrations -> swap CAUGHT
+        dev  24d:  7 credits,  7 distinct narrations -> swap MISSED
+        eval 24d:  7 credits,  7 distinct narrations -> swap MISSED
+
+    On a statement where every narration happens to be unique, a swap of two
+    unconstrained string columns passes every gate this module has. That is a real
+    hole and there is no exact fix available: nothing in the schema constrains the
+    SHAPE of a `bank_ref`, and inventing a format rule would encode our generator's
+    `bc_<crc>` convention, which no real bank shares -- fitting the fence to our own
+    synthetic data, which is the Sec 9 anti-pattern one level down.
+
+    So the honest statement of this view's fence is: gates 1 and 2, plus a
+    uniqueness check that is decisive on realistic volumes and silent on tiny ones.
+    `tests/test_schema_repair_fence.py` asserts BOTH halves, so the limit cannot
+    quietly stop being believed.
+    """
+    field = IDENTITY_FIELD.get(view)
+    if field is None:
         return True
-    if not repo.settlements:
-        # Nothing to resolve against. Withhold judgement rather than reject a
-        # mapping for a reason that is not about the mapping.
-        return True
-    known = set(repo.settlement_by_utr())
-    return any((parse_utr(r.narration) or "") in known for r in rows)
+    values = [getattr(row, field) for row in rows]
+    return len(set(values)) == len(values)
 
 
 def _reread(data_dir: Path, view: str, bad: list[QuarantinedRow]) -> list[dict] | None:
@@ -226,7 +276,7 @@ def repair(data_dir: Path, repo: Repository, adjudicator: Adjudicator,
             continue
 
         mapping = result.data.get("mapping")
-        failed_gate = _verify(view, model, mapping, samples, observed, repo)
+        failed_gate = _verify(view, model, mapping, samples, observed)
         if failed_gate is not None:
             stats.blocked_bad_mapping += 1
             audit.record("blocked_bad_mapping", source_file=view, gate=failed_gate,
@@ -244,7 +294,7 @@ def repair(data_dir: Path, repo: Repository, adjudicator: Adjudicator,
     return repo
 
 
-def _verify(view, model, mapping, samples, observed, repo) -> str | None:
+def _verify(view, model, mapping, samples, observed) -> str | None:
     """Run the four gates in order. Returns the gate that failed, or None.
 
     Named rather than boolean: `blocked_bad_mapping` is a number we intend to
@@ -279,7 +329,7 @@ def _verify(view, model, mapping, samples, observed, repo) -> str | None:
         return "identity:sec_3_2_violated"
 
     # --- gate 4: utility ------------------------------------------------------
-    if not _is_useful(view, repaired, repo):
+    if not _is_useful(view, repaired):
         return "utility:view_serves_no_join"
     return None
 

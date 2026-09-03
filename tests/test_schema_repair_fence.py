@@ -155,14 +155,31 @@ def test_structurally_impossible_mappings_are_blocked(request, tmp_path, seed,
     assert not result.repo.lines
 
 
+def _duplicate_one_narration(data: Path, column: str) -> Path:
+    """Make two credits share a narration, as they do at realistic volume.
+
+    The 88-day seeds carry 23 credits and 22 distinct narrations on both dev and
+    eval. The 24-day test fixture carries 7 and 7. Gate 4 turns on exactly that
+    difference, so a test of gate 4 has to supply it rather than hope for it.
+    """
+    path = data / BANK_VIEW
+    rows = [json.loads(line) for line in
+            path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows[1][column] = rows[0][column]
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+    return data
+
+
 @pytest.mark.parametrize("seed", SEEDS)
-def test_a_mapping_that_leaves_the_view_useless_is_blocked(request, tmp_path, seed):
-    """Gate 4. `bank_ref` and `narration` are both plain strings, so swapping
-    them re-validates cleanly and satisfies every identity -- the bank view has
-    none. What it produces is a statement from which no reference can be read,
-    and that has to be caught somewhere."""
+def test_a_mapping_that_collapses_the_primary_key_is_blocked(request, tmp_path, seed):
+    """Gate 4. `bank_ref` and `narration` are both unconstrained strings, so a swap
+    re-validates cleanly and satisfies every containment -- the bank view has none.
+    What catches it is that a primary key must be UNIQUE, and narrations repeat."""
     data = _drift(_seed_dir(request, seed), tmp_path / f"u_{seed}",
                   BANK_VIEW, "narration", "description")
+    _duplicate_one_narration(data, "description")   # already renamed by _drift
     result = pipeline.run(data, tmp_path / f"out_u_{seed}",
                           adjudicator=Mapper(overrides={"description": "bank_ref",
                                                         "bank_ref": "narration"}))
@@ -171,6 +188,37 @@ def test_a_mapping_that_leaves_the_view_useless_is_blocked(request, tmp_path, se
     assert not result.repo.bank
     # And the F-018 guard still holds behind it: no false missing-money claim.
     assert not [r for r in result.exceptions if r.code == "MISSING_BANK_CREDIT"]
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_limit_of_gate_4_is_asserted_rather_than_assumed(request, tmp_path, seed):
+    """THE HOLE, PINNED SO IT CANNOT QUIETLY STOP BEING BELIEVED.
+
+    Gate 4 is data-dependent. Where every narration is distinct -- which the small
+    fixture is, and a real statement can be -- swapping two unconstrained string
+    columns collapses no key, breaks no containment, and **passes**.
+
+    There is no exact fix: nothing in the schema constrains the shape of a
+    `bank_ref`, and inventing a format rule would encode our generator's `bc_<crc>`
+    convention, which no real bank shares. This test exists so the limit is a
+    measured property of the system rather than a sentence in a docstring.
+    """
+    data = _drift(_seed_dir(request, seed), tmp_path / f"lim_{seed}",
+                  BANK_VIEW, "narration", "description")
+    rows = [json.loads(line) for line in
+            (data / BANK_VIEW).read_text(encoding="utf-8").splitlines() if line.strip()]
+    narrations = [r["description"] for r in rows]
+    assert len(set(narrations)) == len(narrations), (
+        "this fixture is supposed to have all-distinct narrations")
+
+    result = pipeline.run(data, tmp_path / f"out_lim_{seed}",
+                          adjudicator=Mapper(overrides={"description": "bank_ref",
+                                                        "bank_ref": "narration"}))
+
+    assert result.llm.blocked_bad_mapping == 0, (
+        "if this now BLOCKS, gate 4 got stronger -- good; update the docstring and "
+        "this test rather than leaving the limit documented as still present")
+    assert result.repo.bank, "the swapped mapping was accepted, which is the limit"
 
 
 @pytest.mark.parametrize("seed", SEEDS)

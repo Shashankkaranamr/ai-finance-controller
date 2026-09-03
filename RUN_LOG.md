@@ -1712,3 +1712,80 @@ lakh-sized value in `fees` satisfies. **Accepted and exactly wrong**, which is t
 
 No other scenario is affected: S1–S8 and S10 all rename to names that are not fields on their target
 model, so each quarantines its whole view as intended. Checked before running, not after.
+
+### ADDENDUM 2 — gate 4 was broken, found by the stub before any live call · 03 Sep 2026
+
+The harness was run against a **truthful stub** before spending a single billable call, on the
+principle that "one run, no re-rolls" is meaningless if a harness or gate bug can force a second one.
+It found two defects. Recorded here, before the live run, with the measurements that diagnosed them.
+
+#### Defect 1 — gate 4 blocked correct mappings, and only on the held-out seed
+
+The stub answers every scenario from the registry, so **every mapping it proposes is correct by
+construction**. Two came back blocked:
+
+```
+eval:  S1_bank_narration   CORRECT  blocked
+       S5_bank_three       CORRECT  blocked
+dev:   all ten             CORRECT  accepted
+```
+
+A gate that rejects a right answer on one seed and not the other is not testing the answer. Cause:
+gate 4 required that some repaired bank narration parse to a UTR **resolving to a known settlement**.
+That is not a property of the mapping — it is a property of whether our regex can read this seed's
+narration families, which is the exact gap Tier 3 exists to cover.
+
+| | credits | regex parsed | resolve to a settlement |
+|---|---|---|---|
+| dev | 23 | 23 | 21 → gate waves everything through |
+| **eval** | 23 | **2** | **0 → gate blocks every bank mapping, however correct** |
+
+**Strictest on the held-out seed, for a reason with nothing to do with the answer.** Had this not been
+caught, 2 of 10 published scenarios would have been scored as the fence rejecting a correct mapping,
+and the "correct + BLOCKED" cell would have carried two entries that were entirely our bug.
+
+**Fixed:** gate 4 now asks whether the column mapped to the view's **primary key is unique**. A key
+must identify. That is a real invariant, checkable exactly, and it applies to **all four views**
+rather than one — a straight improvement on what it replaced. Re-run against the stub: 10/10 accepted
+on both seeds.
+
+#### Defect 2 — the replacement is data-dependent, and the first claim for it was too strong
+
+The fix was written up as "exact, total, seed-independent". The fence suite immediately falsified
+that: the `bank_ref`/`narration` swap it is supposed to catch **passed**. Measured:
+
+```
+dev  88d: 23 credits, 22 distinct narrations -> swap CAUGHT
+eval 88d: 23 credits, 22 distinct narrations -> swap CAUGHT
+dev  24d:  7 credits,  7 distinct narrations -> swap MISSED
+eval 24d:  7 credits,  7 distinct narrations -> swap MISSED
+```
+
+Uniqueness catches the swap only when some narration **repeats** — which it does at realistic volume
+and does not on the small fixture. So gate 4 is **data-dependent, not exact**, and on a statement
+whose narrations happen to all be distinct, swapping two unconstrained string columns passes every
+gate this module has.
+
+**There is no exact fix available.** Nothing in the schema constrains the *shape* of a `bank_ref`, and
+inventing a format rule would encode our generator's `bc_<crc>` convention, which no real bank shares
+— fitting the fence to our own synthetic data, which is the Sec 9 anti-pattern one level down.
+
+So the limit is stated instead of closed, and **both halves are now asserted**:
+`test_a_mapping_that_collapses_the_primary_key_is_blocked` supplies the duplicate and proves the gate
+fires; `test_the_limit_of_gate_4_is_asserted_rather_than_assumed` proves it does *not* fire without
+one, and says in its body that if it ever starts blocking, the docstring and the test should be
+updated rather than the limit left documented as still present.
+
+#### What this does to the pre-registration
+
+**Nothing is withdrawn and no prediction changes.** Both defects are in the *gate*, found before any
+scenario ran, and neither touches the scenarios, the prompt, or the predicted accuracy. The 2×2 is
+unaffected except that the "correct + BLOCKED" cell now means what it was supposed to mean.
+
+One prediction gets **sharper**, and it is worth noting that this cuts against us: the pre-registration
+predicted the dangerous cell would be non-empty because gate 3 is weak on `settlements`, `books` and
+`bank`. Gate 4 is now stronger on all four views, so the fence has *more* chance of catching S9 than
+when the prediction was written. **The prediction stands as written** — if S9 is now caught, that is
+the prediction being wrong in the direction that flatters us, and it will be reported that way.
+
+371 tests. `metrics.json` byte-identical on both seeds. Still no live call made.
