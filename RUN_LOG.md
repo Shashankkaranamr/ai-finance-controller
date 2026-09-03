@@ -1570,3 +1570,108 @@ cannot reach the ledger, and that property came from the gates, not from the mod
 
 4 calls, 9.7 s, Haiku tier. `map_schema` was 3,880 ms of it — the largest payload the project sends
 (26 column names, 26 target fields, one full sample row) and still a single short completion.
+
+---
+
+## PRE-REGISTERED — map_schema scenario suite · 03 Sep 2026
+
+**Written before any code was touched.** The 03 Sep live run was n=1: one mapping, one view, one
+seed, correct. That is a smoke test, and this suite exists to replace it with a sample. The
+prediction is recorded first so the result cannot drift toward the flattering answer.
+
+### Scale: 10 scenarios
+
+Ten, not five and not thirty. Five cannot separate "the model is good at this" from "we picked easy
+renames"; thirty spends a protected artifact day on a number that will not read differently at n=30
+than at n=10. Ten gives every shape at least two instances and every view at least two.
+
+### The four shapes, and why each is here
+
+| # | View | Shape | The rename | Why this one |
+|---|---|---|---|---|
+| **S1** | bank | single obvious | `narration` → `description` | Only free-text field. Near-certain; a floor, not a test |
+| **S2** | lines | single obvious | `entity_id` → `entity_ref` | The 03 Sep n=1 case, kept for continuity |
+| **S3** | settlements | single ambiguous | `fees` → `charges` | `tax` is also a charge-shaped money field; the name alone does not separate them |
+| **S4** | lines | single ambiguous | `created_at` → `date` | **Three** date fields exist (`created_at`, `settled_at`, `posted_at`). A generic name forces value-based ordering |
+| **S5** | bank | multiple (3) | `narration`→`remarks`, `value_date`→`txn_date`, `bank_ref`→`ref_no` | Half the view renamed at once; each plausible in isolation |
+| **S6** | lines | multiple (3) | `fee`→`commission`, `tax`→`gst`, `amount`→`gross` | Three money fields, all with real-world-plausible aliases |
+| **S7** | lines | misleading | `credit`→`debit_amount`, `debit`→`credit_amount` | The new name asserts the **opposite** field. Values disambiguate — one side is 0 |
+| **S8** | books | misleading | `gross_amount` → `net_amount` | Name says net, values are gross. Only one money field, so the mapping is forced regardless |
+| **S9** | settlements | misleading + collision | `amount`→`fees`, `fees`→`amount` | Both new names are **real fields in the target schema**. Trusting names produces a clean, type-valid, exactly-wrong mapping |
+| **S10** | books | opaque, all 7 | every column → `c1`…`c7` | No name signal at all. Pure value inference, and three of the seven are unconstrained strings |
+
+Coverage: single obvious ×2, single ambiguous ×2, multiple ×2, misleading ×3, opaque ×1. All four
+views; `settlement_lines` ×4 because it is the only view with strong containment.
+
+### What counts as correct — TWO questions, measured separately
+
+D-023's lesson applies directly: *"the model was correct" and "the action was safe" are different
+questions.* Conflating them here would repeat that error, so each scenario records both:
+
+- **`model_correct`** — the proposed mapping is exactly the inverse of the applied rename. Not
+  "close", not "the gates liked it". Exact.
+- **`gate_outcome`** — accepted, or blocked and by which gate.
+
+The deliverable is the 2×2, and each cell means something different:
+
+| | accepted | blocked |
+|---|---|---|
+| **correct** | working as designed | **the fence is too strict** — it rejected a right answer |
+| **wrong** | **THE DANGEROUS CELL** — a wrong mapping reached the repository | the fence did its job |
+
+### The prediction
+
+**Model accuracy: 7 of 10 exactly correct.** Not a hedge — the three I expect to fail are named.
+
+| At risk | Why |
+|---|---|
+| **S10** (opaque, books) | `order_id`, `receipt`, `customer_id` are all bare strings with no arithmetic to anchor them. I expect the money and date fields right and at least one string field transposed |
+| **S9** (amount↔fees swap) | The only signal separating them is **magnitude** — a settlement amount is lakhs, its fees thousands. If the model weights the name over the value it produces a clean inversion |
+| **S4** (three dates) | `created_at ≤ settled_at ≤ posted_at` orders them, but all three are dates and the renamed one is called `date` |
+
+I expect **S1, S2, S5, S6, S7, S8** correct, and **S3** correct — fees and tax separate by magnitude
+the same way S9's fields do, but without the name actively lying.
+
+### The sharper prediction, and the reason this is worth running
+
+**At least one WRONG mapping will be ACCEPTED — the dangerous cell will not be empty.**
+
+Gate 3 is only strong on `settlement_lines`, which has four independent containments. On
+`settlements` there is exactly one (`tax <= fees`), because `amount` is signed. On `books` and `bank`
+there are **none**, and the module says so. So on those three views a wrong-but-type-valid mapping has
+only gates 1, 2 and 4 to get past, and none of them looks at whether a number landed in the right
+column.
+
+**S9 is the specific case I expect to expose this.** If the model trusts the names and returns the
+identity mapping, the settlement amount lands in `fees` and the fees land in `amount`. Containment
+checks `tax <= fees` — and with a lakh-sized value now sitting in `fees`, that **passes**. The gate
+would admit an exactly inverted view.
+
+If that happens it is a finding about **our gate**, not about the model, and the honest sentence next
+to it is that the fence is strong where we happened to have arithmetic and weak where we did not.
+
+### What I expect NOT to move
+
+`false_clear_in_remit` on any scenario the gates block, and `linkage_precision` at 100.00% throughout
+— **unless** the dangerous cell is non-empty, in which case one or both should move, and that is the
+measurement. Determinism on the deterministic core stays byte-identical: the scenario registry is
+seeded and applied to copies, never to `data/generated/eval` itself.
+
+### Costs recorded before starting
+
+**1. This adds a generator surface that ships.** Unlike the second-gateway knob, drift scenarios are
+not a knob on the world — they belong to the extract layer, alongside `derive`. If they ship they
+ship for both seeds. Stated now so it is not discovered at the gate.
+
+**2. I am writing both the scenarios and the prompt.** The prompt was written on 02 Sep and is **not
+being touched** — leaving it alone is what keeps this a held-out test rather than a tuned one. If any
+scenario is adjusted after seeing a result, the whole suite is invalidated and the entry says so.
+
+**3. Ten live calls, plus whatever the pipeline itself makes.** One run per scenario, no re-rolls,
+same protocol as every live run this week.
+
+### Estimate: ~2h 30m
+
+Scenario registry and drift applier, reusing the `TemplateFamily` registry pattern (45m) · invariant
+suite, determinism and false-clear over the new surface (45m) · live run and per-scenario capture
+(30m) · RUN_LOG result entry (30m).
