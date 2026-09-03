@@ -1675,3 +1675,40 @@ same protocol as every live run this week.
 Scenario registry and drift applier, reusing the `TemplateFamily` registry pattern (45m) · invariant
 suite, determinism and false-clear over the new surface (45m) · live run and per-scenario capture
 (30m) · RUN_LOG result entry (30m).
+
+### ADDENDUM to the pre-registration — S9 amended · 03 Sep 2026, before any run
+
+Found while building, **before any scenario was executed**. Recorded rather than quietly fixed,
+because amending a pre-registration is exactly the move that destroys one if it is not visible.
+
+**S9 as written would have tested nothing.** It renamed `amount`→`fees` and `fees`→`amount` on
+`settlements.jsonl` — a pure swap. Both names are real fields on `SettlementRow`, so every key stays
+valid, **Pydantic accepts the row**, nothing quarantines, and `map_schema` never runs. Verified
+directly:
+
+```
+amount now holds 218683 (was fees), fees now holds 17983537 (was amount)   -> validates cleanly
+```
+
+**That is a finding in its own right, and a worse one than the scenario it broke.** The ingest
+boundary is **blind to a value swap between two same-typed columns**. `extra="forbid"` catches a name
+it does not recognise; it cannot catch a name it recognises holding the wrong thing. Schema repair
+only ever sees views that FAIL validation, so this class never reaches it — the inverted data flows
+straight through to Tier 0 and posts. Logged for the failure log; it is not something this suite can
+fix, and it is not something the fence was ever asked to.
+
+**S9 is amended to add a third rename that forces quarantine**, keeping the swap intact as the thing
+under test:
+
+| | pre-registered | amended |
+|---|---|---|
+| S9 | `amount`→`fees`, `fees`→`amount` | `id`→`ref`, `amount`→`fees`, `fees`→`amount` |
+
+The prediction attached to S9 is **unchanged and still stands**: the model sees columns literally
+named `fees` and `amount` holding each other's values, and if it weights the name over the magnitude
+it returns `fees`→`fees`, `amount`→`amount`. That mapping is injective, covers every observed column,
+names only real fields, and re-validates — and containment only asks `tax <= fees`, which a
+lakh-sized value in `fees` satisfies. **Accepted and exactly wrong**, which is the dangerous cell.
+
+No other scenario is affected: S1–S8 and S10 all rename to names that are not fields on their target
+model, so each quarantines its whole view as intended. Checked before running, not after.
