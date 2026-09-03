@@ -1,0 +1,230 @@
+[
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2666,
+  "name": "S1_bank_narration",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The 'description' column contains the full transaction narrative text (NEFT CR-ACME DISTRIBUTORS...), matching the target 'narration' field, while all other columns map directly by name.",
+  "renames": 1,
+  "shape": "single obvious",
+  "view": "bank.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 3868,
+  "name": "S2_lines_entity_id",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The observed column 'entity_ref' contains a reference identifier ('setlodp_gOFf7SqYMFy5PU') that maps to the target field 'entity_id'; all other columns match their target field names exactly.",
+  "renames": 1,
+  "shape": "single obvious",
+  "view": "settlement_lines.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2051,
+  "name": "S3_settlements_fees",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The 'charges' column contains a monetary value (218683) that represents transaction costs, corresponding to the 'fees' field in the target schema; all other columns map directly by name or semantic equivalence.",
+  "renames": 1,
+  "shape": "single ambiguous",
+  "view": "settlements.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2580,
+  "name": "S4_lines_created_at",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The observed 'date' column (2026-04-01) represents the transaction creation date, mapping to the target field 'created_at'; all other columns match their target field names exactly by name and semantic meaning.",
+  "renames": 1,
+  "shape": "single ambiguous",
+  "view": "settlement_lines.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2009,
+  "name": "S5_bank_three",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The sample values clearly show: amount is numeric, currency is 'INR', ref_no is a bank reference identifier, remarks contains transaction narrative text, and txn_date is the transaction date; narration_family is null but maps to the target field of the same name.",
+  "renames": 3,
+  "shape": "multiple at once",
+  "view": "bank.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 3737,
+  "name": "S6_lines_money_three",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The 'gross' value (492159) represents the total transaction amount, 'commission' (5226) is a fee, and 'gst' (797) is the tax component; the remaining columns map directly by name or by financial semantics.",
+  "renames": 3,
+  "shape": "multiple at once",
+  "view": "settlement_lines.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": false,
+  "declined": "",
+  "foots": true,
+  "gate": "identity:sec_3_2_violated",
+  "matches_clean": false,
+  "metrics": [
+   0,
+   180,
+   10000
+  ],
+  "ms": 3275,
+  "name": "S7_lines_credit_debit",
+  "outcome": "blocked",
+  "quarantined": 1789,
+  "rationale": "The observed columns map directly to target fields with 'credit_amount' and 'debit_amount' being shortened to 'credit' and 'debit' in the target schema, which is confirmed by the sample row showing typical accounting split values (credit_amount: 0, debit_amount: 486933).",
+  "renames": 2,
+  "shape": "misleading name",
+  "view": "settlement_lines.jsonl",
+  "wrong": {
+   "credit_amount": [
+    "credit",
+    "debit"
+   ],
+   "debit_amount": [
+    "debit",
+    "credit"
+   ]
+  }
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2379,
+  "name": "S8_books_gross",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The observed 'net_amount' (492159) represents the actual transaction total and maps to the target's 'gross_amount' field, as it is the only numeric amount column available and the most representative of the total transaction value.",
+  "renames": 1,
+  "shape": "misleading name",
+  "view": "books.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": false,
+  "declined": "",
+  "foots": true,
+  "gate": "identity:sec_3_2_violated",
+  "matches_clean": false,
+  "metrics": [
+   0,
+   6,
+   10000
+  ],
+  "ms": 2212,
+  "name": "S9_settlements_swap",
+  "outcome": "blocked",
+  "quarantined": 22,
+  "rationale": "The 'ref' column contains a unique identifier (setl_rPeEKbejZcd2T2) that maps to the 'id' field, while all other columns match their target field names directly.",
+  "renames": 3,
+  "shape": "misleading name",
+  "view": "settlements.jsonl",
+  "wrong": {
+   "amount": [
+    "amount",
+    "fees"
+   ],
+   "fees": [
+    "fees",
+    "amount"
+   ]
+  }
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2535,
+  "name": "S10_books_opaque",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "Column values directly match target field semantics: INR is a currency code, cust_900099 is a customer identifier, 492159 is a numeric amount, 2026-04-01 is a date, 'card' is a payment method, order_KxpIYNatO95FBv is an order identifier, and rcpt-4650768 is a receipt number.",
+  "renames": 7,
+  "shape": "opaque, no name signal",
+  "view": "books.jsonl",
+  "wrong": {}
+ }
+]

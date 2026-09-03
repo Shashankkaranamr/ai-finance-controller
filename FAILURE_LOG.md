@@ -732,3 +732,67 @@ accepted and every wrong one was too. A fence with a 100% pass rate on a set con
 inputs is not a fence yet, and the only reason we know that is that the scenarios carried ground
 truth. That is the argument for scoring `model_correct` and `gate_outcome` separately, and it is why
 this run was worth more than the n=1 that preceded it.
+
+---
+
+### F-022 · 03 Sep 2026 · A foreign-key swap emptied 40% of the exception queue and every signal read clean
+
+**What broke.** Exchanging `order_id` and `payment_id` on `settlement_lines` — a
+mapping a live model proposes unprompted — passed **all four** existing gates and
+took the exception queue apart:
+
+| | dev | eval |
+|---|---|---|
+| detection recall | 195/195 → **116/195 (59.49%)** | 187/187 → **109/187 (58.29%)** |
+| **false clear, in remit** | 0/195 → **79/195** | 0/187 → **78/187** |
+
+against an invariant that says in-remit false clear must be **0.00%**. And while
+that happened: `blocked_bad_mapping` **0**, statement **foots**, `degraded`
+**false**, linkage precision **100.00%**. Nothing anywhere in the run said a word.
+
+**Cause.** Both fields are `str | None`, so the swap re-validates (gate 2), touches
+no money column (gate 3), leaves `entity_id` unique (gate 4) and names only real
+fields (gate 1). Gates 1–4 are, every one of them, an assertion about a **row**.
+Nothing asserted anything about the **edges between rows**, and the whole system is
+a graph of edges.
+
+**Linkage precision is why this hid so well, and the reason generalises.** It asks
+whether the links we *made* were right. It cannot ask whether the links we *should
+have made* were ever attempted, because an absent edge carries no evidence — the
+D-002 problem, arriving from a new direction. A metric at 100.00% while 40% of the
+queue vanishes is not a broken metric; it is a metric answering the question it was
+built for while nobody asked the other one.
+
+**Recovery.** Gate 5: every foreign key must land on a real row at the rate clean
+data does, floor 90.00% in integer bps, second opinion sourced from the other view
+(D-003). `payment.order_id → books` and `line.settlement_id → settlements` measure
+100.00% clean on both seeds, so the floor carries ten points of margin.
+
+`refund.payment_id` is **excluded**, and the reason is the interesting half: it
+measures **89.53% on dev**, below the floor, because `REFUND_ORPHANED` is the
+declared blind spot injected nine times per seed. Gating it would reject dev's own
+clean data — rejecting a correct mapping because the source contains the anomaly
+the system exists to find. That is the gate-3 GST-rate mistake exactly, and it was
+avoided only because the rate was measured before the threshold was chosen. A test
+asserts the exclusion so it cannot be "tidied up" later.
+
+**Measured after.** FK swap blocked on both seeds, zero lines installed, run
+identical to rules-only. Correct mapping still accepted: false clear **0.00%**,
+detection recall **100.00%**. Replay and a fresh live run both unchanged at 8
+accepted / 0 falsely accepted. **395 tests.** `metrics.json` byte-identical on both
+seeds.
+
+**Standing consequence.**
+
+> **Every gate we had asked "is this row well-formed". None asked "does this row
+> still point at the right other row".** Validation, containment, uniqueness — all
+> row-local. In a system whose entire model is a graph of typed edges, a fence made
+> only of row-local checks has a hole exactly the shape of the model.
+
+And second, smaller but sharper: **a metric reading 100.00% is not evidence that
+nothing is wrong; it is evidence about the one question that metric asks.** Three
+signals read clean here simultaneously. What caught it was ground truth, which
+production does not have.
+
+---
+

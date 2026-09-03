@@ -44,7 +44,7 @@ estimates. If you feel the urge to plan the whole build, re-read §13.1.
 
 **Increments 0–3 — CLOSED 25 Aug – 01 Sep 2026.** · **Audit response — 01 Sep.** ·
 **Realism + review response — 02 Sep.** · **Schema repair — 02 Sep.**
-**377 tests green.** Next: **Increment 6 — artifacts. Protected.**
+**395 tests green.** Next: **Increment 6 — artifacts. Protected.**
 
 Increments 2 and 3 were built **autonomously overnight**; D-018 through D-023 were taken without
 review and remain marked open for override in the Decisions Log.
@@ -115,7 +115,7 @@ until it is signed off.
 ./.venv/Scripts/python.exe -m recon eval     # the HELD-OUT seed: different world AND narrations
 ./.venv/Scripts/python.exe -m recon generate --seed dev --days 88
 ./.venv/Scripts/python.exe -m recon run --seed dev
-./.venv/Scripts/python.exe -m pytest         # 377 tests; use bare pytest, NOT -q (addopts already has it)
+./.venv/Scripts/python.exe -m pytest         # 395 tests; use bare pytest, NOT -q (addopts already has it)
 ```
 
 The venv is at `.venv/`. `make` and `uv` are **not installed** on this machine — `python -m recon`

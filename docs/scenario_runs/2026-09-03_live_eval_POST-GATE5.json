@@ -1,0 +1,230 @@
+[
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2231,
+  "name": "S1_bank_narration",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The 'description' field contains detailed transaction narrative text typical of a narration field, while 'narration_family' is a separate nullable metadata field already named correctly.",
+  "renames": 1,
+  "shape": "single obvious",
+  "view": "bank.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 4133,
+  "name": "S2_lines_entity_id",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The observed column 'entity_ref' contains an identifier value matching the pattern of entity references, and maps to the target field 'entity_id'; all other columns match target fields exactly by name.",
+  "renames": 1,
+  "shape": "single obvious",
+  "view": "settlement_lines.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2129,
+  "name": "S3_settlements_fees",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The 'charges' column (218683) represents transaction fees and maps to the target 'fees' field; all other columns match their target field names directly.",
+  "renames": 1,
+  "shape": "single ambiguous",
+  "view": "settlements.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2182,
+  "name": "S4_lines_created_at",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The observed 'date' column (2026-04-01) represents the transaction creation date and maps to the target field 'created_at'; all other columns match their target field names exactly.",
+  "renames": 1,
+  "shape": "single ambiguous",
+  "view": "settlement_lines.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2093,
+  "name": "S5_bank_three",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The sample values show a transaction date, monetary amount in INR, a bank reference code, and detailed transaction narration in remarks that describes the actual payment details, while narration_family is null but maps to its target field.",
+  "renames": 3,
+  "shape": "multiple at once",
+  "view": "bank.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 3524,
+  "name": "S6_lines_money_three",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The gross value (492159) represents the total transaction amount; commission (5226) is the fee charged; gst (797) is the tax component; all other columns map directly by name or clear semantic match.",
+  "renames": 3,
+  "shape": "multiple at once",
+  "view": "settlement_lines.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": false,
+  "declined": "",
+  "foots": true,
+  "gate": "identity:sec_3_2_violated",
+  "matches_clean": false,
+  "metrics": [
+   0,
+   180,
+   10000
+  ],
+  "ms": 2776,
+  "name": "S7_lines_credit_debit",
+  "outcome": "blocked",
+  "quarantined": 1789,
+  "rationale": "The observed columns are nearly identical to target fields, with only 'credit_amount' mapping to 'credit' and 'debit_amount' mapping to 'debit' based on the schema's simplified naming convention.",
+  "renames": 2,
+  "shape": "misleading name",
+  "view": "settlement_lines.jsonl",
+  "wrong": {
+   "credit_amount": [
+    "credit",
+    "debit"
+   ],
+   "debit_amount": [
+    "debit",
+    "credit"
+   ]
+  }
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2114,
+  "name": "S8_books_gross",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "The observed column 'net_amount' with a numeric value maps to the target field 'gross_amount' as it represents the transaction amount; all other columns match their target field names directly.",
+  "renames": 1,
+  "shape": "misleading name",
+  "view": "books.jsonl",
+  "wrong": {}
+ },
+ {
+  "correct": false,
+  "declined": "",
+  "foots": true,
+  "gate": "identity:sec_3_2_violated",
+  "matches_clean": false,
+  "metrics": [
+   0,
+   6,
+   10000
+  ],
+  "ms": 2212,
+  "name": "S9_settlements_swap",
+  "outcome": "blocked",
+  "quarantined": 22,
+  "rationale": "The 'ref' column contains a unique identifier (setl_rPeEKbejZcd2T2) matching the pattern of a primary key, which maps to the 'id' field; all other columns match their target names directly.",
+  "renames": 3,
+  "shape": "misleading name",
+  "view": "settlements.jsonl",
+  "wrong": {
+   "amount": [
+    "amount",
+    "fees"
+   ],
+   "fees": [
+    "fees",
+    "amount"
+   ]
+  }
+ },
+ {
+  "correct": true,
+  "declined": "",
+  "foots": true,
+  "gate": "-",
+  "matches_clean": true,
+  "metrics": [
+   18,
+   0,
+   10000
+  ],
+  "ms": 2531,
+  "name": "S10_books_opaque",
+  "outcome": "accepted",
+  "quarantined": 0,
+  "rationale": "Column values directly match their semantic meanings: currency code (INR), customer identifier (cust_900099), numeric amount (492159), ISO date (2026-04-01), payment method (card), order reference (order_KxpIYNatO95FBv), and receipt number (rcpt-4650768).",
+  "renames": 7,
+  "shape": "opaque, no name signal",
+  "view": "books.jsonl",
+  "wrong": {}
+ }
+]

@@ -1995,3 +1995,134 @@ not make it retrospectively false.
 
 Both declines are recorded as decisions rather than omissions: **D-037** (fresh-10 suite) and
 **D-038** (F-020's fix specified, not shipped).
+
+---
+
+## Gate 5 — referential integrity · 03 Sep 2026
+
+Found by a separate adversarial review session with live API access, reproduced
+here before anything was built. Gates 1–4 are every one of them an assertion about
+**rows**. This is the first about the **edges between them**.
+
+### The vulnerability, reproduced on both seeds
+
+`order_id` and `payment_id` are both `str | None` on `SettlementLineRow`, so
+exchanging them re-validates perfectly (gate 2), touches no money column (gate 3),
+leaves `entity_id` unique (gate 4), and names only real fields (gate 1). Measured
+with the mapping a live model actually proposes:
+
+| | dev | eval |
+|---|---|---|
+| exception detection recall | 195/195 → **116/195 (59.49%)** | 187/187 → **109/187 (58.29%)** |
+| **false clear, in remit** | 0/195 → **79/195 (40.51%)** | 0/187 → **78/187 (41.71%)** |
+| `blocked_bad_mapping` | **0** | **0** |
+| linkage precision | 100.00% | 100.00% |
+| statement foots · degraded | YES · **false** | YES · **false** |
+
+**Every safety signal we publish read clean while 78 real breaks disappeared.**
+Linkage precision is 100% because it only asks whether the links we *made* were
+right — never whether the links we *should have made* were attempted. That is the
+metric's blind spot, and it is worth stating plainly: precision cannot see an
+absence, which is the same thing F-018 said about rows, one level down.
+
+### The gate
+
+A foreign key must still land on a real row, at the rate clean data does. Floor
+**9000 bps (90.00%)**, integer basis points because the package is float-free by
+property (invariant 1). Same idiom as `settlements.fees` against summed line-item
+fees: the second opinion comes from the **other view**, independently sourced
+(D-003).
+
+Measured clean rates before choosing the floor — the threshold is derived, not
+picked:
+
+| foreign key | dev | eval | gated |
+|---|---|---|---|
+| `payment.order_id` → `books` | **100.00%** | **100.00%** | yes — 10pt margin |
+| `line.settlement_id` → `settlements` | **100.00%** | **100.00%** | yes |
+| `refund.payment_id` → payments | **89.53%** | 90.43% | **NO — see below** |
+
+**`payment_id` is deliberately excluded, and this is the part worth reading.** Its
+clean rate is intrinsically below 100% because `REFUND_ORPHANED` is the declared
+blind spot — nine per seed, injected on purpose. **At a 90% floor, dev's own clean
+data (89.53%) would be rejected.** Gating it would reject a correct mapping because
+the source contains the anomaly the system exists to find, which is precisely the
+mistake the GST rate made in gate 3 and which cost a rewrite that day. The
+exclusion is asserted by a test, not left as a comment.
+
+### What gate 5 does NOT catch
+
+Stated rather than implied away, same discipline as A1's ~96% caveat:
+
+* **A swap between two columns that both resolve.** Nothing here compares a key to
+  the *right* target, only to *a* target. `order_id` against a hypothetical second
+  book key would pass.
+* **Any drift on `payment_id`**, for the reason above.
+* **Anything at all when the referenced view is missing.** The check is skipped —
+  a check that cannot run has not passed (F-018's rule).
+
+### Verification
+
+**1 · The FK swap is blocked.** Both seeds, `blocked_bad_mapping = 1`, zero lines
+installed. Confirmed identical to a rules-only run, so the honest degraded state is
+reached rather than a new one.
+
+**2 · A correct mapping is still accepted** — the control, because a gate that
+blocks everything is a wall. Both seeds: accepted, 1732/1789 lines installed,
+**in-remit false clear 0.00%**, **detection recall 100.00%**. Stronger than
+"accepted": the repaired run restores the exact property the swap destroyed.
+
+**3 · Nothing that passed before now fails.** The historical replay and a **fresh
+live run** both return the same picture, and gate 5 changed neither:
+
+| | replay | fresh live |
+|---|---|---|
+| correct + accepted | 8 | 8 |
+| correct + BLOCKED | 0 | 0 |
+| **wrong + ACCEPTED** | **0** | **0** |
+| wrong + blocked | 2 (S7, S9) | 2 (S7, S9) |
+
+**This is now the third independent live sample, and all three give 8/10 with the
+same two scenarios wrong.** The model's failure mode is **stable, not sampling
+noise** — a stronger claim than any single run supports, and one that only became
+available because the runs were preserved.
+
+**4 · Full suite and determinism.** **395 tests**. `metrics.json` byte-identical on
+both seeds against the pre-Part-1 baseline, and byte-identical across two runs of
+the same seed.
+
+**5 · False clear on the shipped path: 0.00% (0/195) dev, 0.00% (0/187) eval**,
+detection recall 100.00% on both. With the FK-swap scenario present and mapped
+correctly, both return to 0.00% and 100.00%.
+
+### Live: the model makes this mistake, and the gate holds
+
+One live call on the FK-swap scenario, `claude-haiku-4-5`, 3565 ms:
+
+```
+order_ref   -> order_id      (truth: payment_id)
+payment_ref -> payment_id    (truth: order_id)
+```
+
+> *"The observed columns order_ref and payment_ref are identifiers that map to
+> order_id and payment_id respectively **based on their ID-like values in the
+> sample row**."*
+
+Both columns are ID-like, so the values do not determine the answer — the model
+matched on the name and again described it as value-based reasoning. **That is the
+third instance of the same confabulation** (S7 on 03 Sep, and again in the post-fix
+run). It is a consistent property of these rationales, not an outlier, and it is
+the argument for never letting a rationale weigh in a gate.
+
+`blocked_bad_mapping = 1`, zero lines installed. The gate held.
+
+### Scenario bookkeeping
+
+The FK swap ships as **`R1_lines_fk_swap` in `REGRESSION_SCENARIOS`, deliberately
+outside the pre-registered ten.** The published **8/10** is a fact about
+`SCENARIOS` and must not quietly become 8/11 because a fixture was appended to the
+same list. A test pins `len(SCENARIOS) == 10` and asserts the two sets are
+disjoint.
+
+Raw run records are now preserved under `docs/scenario_runs/`, because `out/` is
+gitignored and the 03 Sep before-state was overwritten once already.

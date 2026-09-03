@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from recon.generate import drift
-from recon.ingest.load import BANK_VIEW, LINES_VIEW
+from recon.ingest.load import BANK_VIEW, LINES_VIEW, load_all
 from recon.llm.client import AdjudicationRequest, AdjudicationResult, NullAdjudicator
 from recon.resolve import pipeline
 from recon.resolve.schema_repair import JOB_MAP_SCHEMA
@@ -335,3 +335,95 @@ def test_the_correct_mapping_for_both_is_still_accepted(request, tmp_path, seed)
 
         assert result.llm.blocked_bad_mapping == 0, f"{name}: correct mapping rejected"
         assert not result.repo.quarantined, f"{name}: correct mapping did not recover"
+
+
+# --- gate 5: referential integrity (F-022) -----------------------------------
+#
+# Gates 1-4 are all assertions about ROWS. This is the first about the EDGES
+# between them, and the swap below passes every one of the other four.
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_a_foreign_key_swap_is_blocked_by_referential_integrity(request, tmp_path, seed):
+    """F-022. `order_id` and `payment_id` are both `str | None`, so exchanging them
+    re-validates (gate 2), touches no money column (gate 3), leaves `entity_id`
+    unique (gate 4) and names only real fields (gate 1).
+
+    Unblocked, this took detection recall to 58.29% on eval and put 78 real breaks
+    through as clean, while blocked_bad_mapping stayed 0, the statement footed,
+    degraded stayed false and linkage precision read 100.00%.
+    """
+    scenario = drift.BY_NAME["R1_lines_fk_swap"]
+    data = drift.apply(scenario, _seed_dir(request, seed), tmp_path / f"fk_{seed}")
+    result = pipeline.run(data, tmp_path / f"out_fk_{seed}",
+                          adjudicator=Mapper(overrides={"payment_ref": "payment_id",
+                                                        "order_ref": "order_id"}))
+
+    assert result.llm.blocked_bad_mapping == 1
+    assert not result.repo.lines, "a view with inverted foreign keys was installed"
+
+    # As with F-021: a blocked repair must land exactly where no adjudicator would.
+    # False clear is legitimately high with the view still quarantined -- what must
+    # not happen is the view loading with its keys crossed.
+    rules_only = pipeline.run(data, tmp_path / f"out_fk_null_{seed}",
+                              adjudicator=NullAdjudicator())
+    assert (result.metrics.false_clear_in_remit.numerator
+            == rules_only.metrics.false_clear_in_remit.numerator)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_correct_fk_mapping_is_still_accepted_and_restores_the_run(
+        request, tmp_path, seed):
+    """The control for gate 5. A gate that blocks everything is a wall.
+
+    Stronger than "accepted": the repaired run must return detection recall to
+    100% and in-remit false clear to zero, which is the property gate 5 exists to
+    protect and the one the swap destroyed.
+    """
+    scenario = drift.BY_NAME["R1_lines_fk_swap"]
+    src = _seed_dir(request, seed)
+    data = drift.apply(scenario, src, tmp_path / f"fkok_{seed}")
+    result = pipeline.run(data, tmp_path / f"out_fkok_{seed}",
+                          adjudicator=Mapper(overrides=drift.truth_mapping(scenario, src)))
+
+    assert result.llm.blocked_bad_mapping == 0, "gate 5 rejected a correct mapping"
+    assert not result.repo.quarantined
+    assert result.metrics.false_clear_in_remit.numerator == 0
+    assert (result.metrics.exception_detection_recall.numerator
+            == result.metrics.exception_detection_recall.denominator)
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_the_clean_data_rates_gate_5_assumes_are_still_true(request, tmp_path, seed):
+    """The threshold is only safe because of what clean data measures.
+
+    `order_id -> books` and `settlement_id -> settlements` are 100% on both seeds,
+    so a 90% floor carries ten points of margin. If a generator change ever drops
+    them, this fails loudly instead of the gate quietly becoming unreachable.
+    """
+    repo = load_all(_seed_dir(request, seed))
+    payments = [r for r in repo.lines.values()
+                if r.type == "payment" and r.order_id is not None]
+    assert payments
+    assert all(r.order_id in repo.books for r in payments), (
+        "order_id -> books is no longer 100% on clean data; re-derive the floor")
+    assert all(r.settlement_id in repo.settlements for r in repo.lines.values())
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_gate_5_deliberately_does_not_police_payment_id(request, tmp_path, seed):
+    """THE LIMIT, ASSERTED SO IT CANNOT BE BELIEVED AWAY.
+
+    `refund.payment_id -> payments` measures 89.53% on dev and 90.43% on eval,
+    because REFUND_ORPHANED is the declared blind spot -- nine per seed, injected
+    on purpose. At a 90% floor dev's own CLEAN data would be rejected, so gating it
+    would reject a correct mapping because the source contains the anomaly the
+    system exists to find. That is the mistake the GST rate made in gate 3.
+    """
+    repo = load_all(_seed_dir(request, seed))
+    refunds = [r for r in repo.lines.values() if r.type == "refund" and r.payment_id]
+    index = repo.payments_by_payment_id()
+    resolved = sum(1 for r in refunds if r.payment_id in index)
+    assert resolved < len(refunds), (
+        "payment_id now resolves for every refund; the blind spot is gone and this "
+        "exclusion should be revisited")
+    assert resolved * 10_000 // len(refunds) < 10_000

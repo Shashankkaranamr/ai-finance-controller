@@ -1128,3 +1128,36 @@ detects mis-columned data **that failed validation first**, and F-020 says plain
 we have lives behind a quarantine, so data that never quarantines is unguarded. That sentence ships
 in the failure log rather than being softened.
 **Supersedes:** —
+
+### D-039 · Gate 5 · 2026-09-03 · Referential integrity is gated at a measured floor, and `payment_id` is excluded
+**Decision:** `map_schema` gains a fifth gate. Every foreign key on a repaired view
+must resolve at the rate clean data resolves it, floor **9000 bps (90.00%)**,
+checked against the other view and independently sourced (D-003). Gated:
+`payment.order_id → books` and `line.settlement_id → settlements`. **Not gated:
+`refund.payment_id`.**
+**Why:** Gates 1–4 are all row-local, and an `order_id`/`payment_id` swap passes
+every one of them while in-remit false clear goes from 0 to 78/187 and detection
+recall to 58.29% — with `blocked_bad_mapping` at 0, the statement footing,
+`degraded` false and linkage precision at 100.00% (F-022). The system's model is a
+graph of edges; a fence made only of row checks has a hole the shape of the model.
+
+The floor is **derived, not chosen**. The two gated keys measure **100.00% on both
+seeds**, so 90% carries ten points of margin while a swap drives resolution to
+essentially zero. `payment_id` measures **89.53% dev / 90.43% eval** because
+`REFUND_ORPHANED` is the declared blind spot, nine per seed by design — at a 90%
+floor **dev's own clean data would be rejected**, which is the gate-3 GST-rate
+mistake repeated. Excluding it is not a gap left open by accident; it is the only
+correct answer given what the data legitimately contains.
+**What it rules out:** Claiming the fence checks referential integrity in general.
+It does not. It checks **two** keys, at a rate, against views that loaded. It
+cannot catch a swap between two columns that both resolve — nothing compares a key
+to the *right* target, only to *a* target — it says nothing about `payment_id`, and
+it is skipped entirely when the referenced view is absent, because a check that
+cannot run has not passed. All three limits are asserted by tests rather than
+described in prose.
+
+Also ruled out: folding the FK-swap fixture into the pre-registered ten. It ships
+as `R1_lines_fk_swap` in `REGRESSION_SCENARIOS`, and a test pins
+`len(SCENARIOS) == 10`, because the published **8/10** is a fact about the
+registered suite and must not drift by appending.
+**Supersedes:** —

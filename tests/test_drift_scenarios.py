@@ -44,7 +44,11 @@ ABSENCE_CLAIMS = {
 }
 
 SEEDS = ("dev", "eval")
-NAMES = [s.name for s in drift.SCENARIOS]
+
+# Property tests cover EVERY scenario, pre-registered or not -- a regression
+# fixture that quietly stops quarantining is as useless as a registered one. The
+# COUNT, separately, stays pinned to the ten that were pre-registered.
+NAMES = [s.name for s in drift.SCENARIOS + drift.REGRESSION_SCENARIOS]
 
 
 def _seed_dir(request, seed):
@@ -56,14 +60,18 @@ def _seed_dir(request, seed):
 def test_the_suite_is_the_size_it_was_pre_registered_at():
     """Ten. A scenario added or dropped after the fact changes what the published
     accuracy is out of, so the count is pinned rather than left to drift."""
-    assert len(drift.SCENARIOS) == 10
-    assert len(set(NAMES)) == 10, "scenario names must be unique -- they key the results"
+    assert len(drift.SCENARIOS) == 10, (
+        "the published 8/10 is a fact about SCENARIOS; a fixture added later belongs "
+        "in REGRESSION_SCENARIOS, not here")
+    assert len(set(NAMES)) == len(NAMES), "names must be unique -- they key the results"
+    assert not ({s.name for s in drift.SCENARIOS}
+                & {s.name for s in drift.REGRESSION_SCENARIOS})
 
 
 def test_every_scenario_names_a_real_view_and_real_fields():
     """A typo in a rename would silently produce a scenario that renames nothing,
     quarantine nothing, and pass every other test in this file."""
-    for scenario in drift.SCENARIOS:
+    for scenario in drift.SCENARIOS + drift.REGRESSION_SCENARIOS:
         model = MODEL_FOR_VIEW[scenario.view]
         for original, _ in scenario.renames:
             assert original in model.model_fields, (
@@ -78,7 +86,7 @@ def test_only_the_swap_scenario_renames_onto_a_field_that_already_exists():
     is the swap under test -- and pairs it with a third rename that forces the
     quarantine. Any OTHER scenario doing this is a silent no-op.
     """
-    for scenario in drift.SCENARIOS:
+    for scenario in drift.SCENARIOS + drift.REGRESSION_SCENARIOS:
         fields = set(MODEL_FOR_VIEW[scenario.view].model_fields)
         collides = {new for _, new in scenario.renames if new in fields}
         if scenario.name == "S9_settlements_swap":
@@ -133,7 +141,7 @@ def test_applying_a_scenario_never_mutates_the_source(request, tmp_path, seed):
     of it, never a change to it."""
     src = _seed_dir(request, seed)
     before = {p.name: p.read_bytes() for p in sorted(src.glob("*.jsonl"))}
-    for scenario in drift.SCENARIOS:
+    for scenario in drift.SCENARIOS + drift.REGRESSION_SCENARIOS:
         drift.apply(scenario, src, tmp_path / f"m_{scenario.name}")
     after = {p.name: p.read_bytes() for p in sorted(src.glob("*.jsonl"))}
     assert before == after

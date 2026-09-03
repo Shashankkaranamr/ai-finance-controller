@@ -117,7 +117,22 @@ SCENARIOS: tuple[DriftScenario, ...] = (
         "no name signal at all; three of the seven are unconstrained strings"),
 )
 
-BY_NAME = {scenario.name: scenario for scenario in SCENARIOS}
+# Scenarios added AFTER the 03 Sep pre-registration, kept in a separate tuple so
+# the measured suite stays exactly the ten it was registered at. The published
+# "8/10" is a fact about SCENARIOS and must not quietly become 8/11 because a
+# regression fixture was appended to the same list.
+REGRESSION_SCENARIOS: tuple[DriftScenario, ...] = (
+    DriftScenario(
+        # F-022. Both fields are `str | None`, so this re-validates, touches no
+        # money column, leaves entity_id unique, and names only real fields --
+        # every one of gates 1-4 passes. It is the reason gate 5 exists.
+        "R1_lines_fk_swap", LINES_VIEW, MISLEADING,
+        (("order_id", "payment_ref"), ("payment_id", "order_ref")),
+        "a foreign-key swap: every row-level signal reads clean, 78 breaks vanish"),
+)
+
+BY_NAME = {scenario.name: scenario
+           for scenario in SCENARIOS + REGRESSION_SCENARIOS}
 
 
 def _rows(path: Path) -> list[dict]:

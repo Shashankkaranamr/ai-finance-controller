@@ -17,7 +17,7 @@ makes this different from every job D-016 declined.
 THE FENCE, WHICH IS STRONGER HERE THAN IN TIER 3
 -------------------------------------------------
 Tier 3 verifies a proposed UTR by exact lookup: it resolves or it does not. Here
-the proposal is a mapping, and it must survive four gates, all exact:
+the proposal is a mapping, and it must survive five gates, all exact:
 
   1. STRUCTURAL -- every target is a real field on the model and every source is a
      column actually present in the file; the mapping is injective and covers
@@ -36,6 +36,10 @@ the proposal is a mapping, and it must survive four gates, all exact:
   4. IDENTITY -- the column mapped to the view's primary key must actually be
      unique. Catches a `bank_ref`/`narration` swap when a narration repeats, which
      it does on realistic volumes. DATA-DEPENDENT, not exact -- see `_is_useful`.
+  5. REFERENTIAL -- every foreign key must still land on a real row, at the rate
+     clean data does. Gates 1-4 are all about ROWS; this is the first one about
+     the EDGES between them, and an `order_id`/`payment_id` swap passes all four
+     of them while 78 real breaks vanish. See `_foreign_keys_resolve`.
 
 Gate 3's strength VARIES BY VIEW, and claiming otherwise would overstate the
 fence:
@@ -109,6 +113,81 @@ def _moves_the_right_way(row) -> bool:
     if side is None:
         return True
     return row.debit == 0 if side == "credit" else row.credit == 0
+
+
+# Gate 5's floor, in integer basis points -- 9000 == 90.00%. A rate, not a count,
+# because the denominator moves with the extract; integer bps because this package
+# is float-free by property, not by style (invariant 1).
+FK_RESOLUTION_FLOOR_BPS = 9000
+
+
+def _foreign_keys_resolve(view: str, rows: list, repo: Repository) -> str | None:
+    """Gate 5: a foreign key must still land on a real row. Returns the broken one.
+
+    WHY GATES 1-4 CANNOT SEE THIS, AND WHY IT IS F-018 ONE LAYER DOWN
+    ------------------------------------------------------------------
+    `order_id` and `payment_id` are both `str | None`, so exchanging them
+    re-validates perfectly (gate 2), touches no money column (gate 3), leaves
+    `entity_id` unique (gate 4), and names only real fields (gate 1). Every gate
+    passes. Measured on the swap a live model actually proposed:
+
+        eval   detection recall 187/187 -> 109/187 (58.29%)   false clear 0 -> 78/187
+        dev    detection recall 195/195 -> 116/195 (59.49%)   false clear 0 -> 79/195
+
+    while `blocked_bad_mapping` stayed 0, the statement footed, `degraded` stayed
+    false and linkage precision read 100.00%. **Every safety signal we publish read
+    clean while 78 real breaks disappeared**, because precision only asks whether
+    the links we made were right -- not whether the links we should have made were
+    ever attempted.
+
+    F-018 said an absence is only evidence when the VIEW loaded completely. This is
+    the same sentence one level down: a foreign key can resolve to the wrong row
+    while every row-level completeness signal reads clean. Rows are not enough;
+    the edges between them have to be checked too.
+
+    THE THRESHOLD, AND WHY IT IS NOT 100%
+    --------------------------------------
+    Same pattern as `settlements.fees` against summed line-item fees (D-003): the
+    second opinion comes from the OTHER VIEW, independently sourced. Measured clean
+    rates, both seeds:
+
+        payment.order_id   -> books         100.00% / 100.00%
+        line.settlement_id -> settlements   100.00% / 100.00%
+        refund.payment_id  -> payments       89.53% /  90.43%   <- EXCLUDED
+
+    **`payment_id` is deliberately not gated.** Its clean rate is intrinsically
+    below 100% because `REFUND_ORPHANED` is the declared blind spot -- nine per
+    seed, injected on purpose -- and at a 90% floor dev's own clean data (89.53%)
+    would be REJECTED. Gating it would reject a correct mapping because the source
+    contains the anomaly the system exists to find, which is exactly the mistake
+    the GST rate made in gate 3. The floor sits at 90% for the two keys that
+    measure 100% clean, so it carries ten points of margin and still catches a
+    swap, which drives resolution to essentially zero.
+
+    WHAT THIS GATE DOES NOT CATCH, STATED RATHER THAN IMPLIED AWAY
+    ---------------------------------------------------------------
+    * A swap between two columns that BOTH resolve -- `order_id` against
+      `order_receipt`, say, if receipts were also book keys. Nothing here compares
+      a key to the *right* target, only to *a* target.
+    * Any drift on `payment_id`, for the reason above.
+    * Anything at all when the referenced view is itself missing: the check is
+      skipped, because a check that cannot run has not passed (F-018's rule).
+    """
+    if view != LINES_VIEW:
+        return None
+
+    if repo.books:
+        payments = [r for r in rows if r.type == "payment" and r.order_id is not None]
+        if payments:
+            hits = sum(1 for r in payments if r.order_id in repo.books)
+            if hits * 10_000 // len(payments) < FK_RESOLUTION_FLOOR_BPS:
+                return f"order_id->books {hits}/{len(payments)}"
+
+    if repo.settlements:
+        hits = sum(1 for r in rows if r.settlement_id in repo.settlements)
+        if rows and hits * 10_000 // len(rows) < FK_RESOLUTION_FLOOR_BPS:
+            return f"settlement_id->settlements {hits}/{len(rows)}"
+    return None
 
 
 def _identity_holds(view: str, rows: list, repo: Repository) -> bool:
@@ -411,6 +490,11 @@ def _verify(view, model, mapping, samples, observed, repo) -> str | None:
     # --- gate 4: utility ------------------------------------------------------
     if not _is_useful(view, repaired):
         return "utility:view_serves_no_join"
+
+    # --- gate 5: referential integrity ----------------------------------------
+    broken = _foreign_keys_resolve(view, repaired, repo)
+    if broken is not None:
+        return f"referential:{broken}"
     return None
 
 

@@ -34,7 +34,7 @@ seen.** Every figure below is reproduced by `python -m recon demo` and `python -
 | **Reconciliation statement** | **foots to zero** | **foots to zero** |
 | Throughput | 3,326 records in ~0.4 s | 3,434 records in ~0.4 s |
 | Determinism | byte-identical `metrics.json` across two runs, a regeneration **and a fresh clone** | same |
-| Tests | **377**, green on a clean clone with `data/` absent | — |
+| Tests | **395**, green on a clean clone with `data/` absent | — |
 
 ### The ablation — what each tier is actually worth
 
@@ -124,7 +124,7 @@ pip install -e ".[dev]"
 python -m recon demo                                # generate + reconcile + report (dev seed)
 python -m recon eval                                # the HELD-OUT seed
 python -m recon ablation --seed eval                # with and without the adjudicator, side by side
-pytest                                              # 377 tests
+pytest                                              # 395 tests
 ```
 
 No network access and no API key are required: the default path is rules-only and fully
@@ -443,7 +443,7 @@ It proposes a mapping from the observed columns to the schema's fields. It is sh
 the target field names and **one** sample row — never the identities, never the rate card, never
 ground truth, because a model told what would make an answer verify can write to the test.
 
-**Four gates, all exact, and a proposal must survive every one:**
+**Five gates, all exact, and a proposal must survive every one:**
 
 | Gate | Rejects |
 |---|---|
@@ -451,6 +451,7 @@ ground truth, because a model told what would make an answer verify can write to
 | **Total re-validation** | any mapping under which even one quarantined row fails Pydantic, `extra="forbid"` still enforced. Not most rows. All of them |
 | **Containment** | a mapping that type-checks and is arithmetic nonsense — `tax > fee`, `fee > amount`, a line moving money the wrong way for its `type`, a settlement whose `fees` disagree with its own line items |
 | **Identity** | a mapping that sends the wrong column to the primary key, collapsing it — caught when the displaced column repeats |
+| **Referential** | a mapping under which a foreign key stops landing on a real row — `order_id` swapped with `payment_id` passes all four checks above while 40% of the exception queue silently empties |
 
 **The containment gate is the one worth explaining, because the obvious version of it was wrong.**
 The natural check is the GST identity — tax is 18% of the MDR base. Measuring killed it: it fails on
@@ -481,7 +482,7 @@ zero on every run for eight days. It is zero **conditional on the inputs loading
 this made that condition visible. The guarantee was never as unconditional as this README implied.
 
 **Run live once, on 03 Sep.** `claude-haiku-4-5`, one call, 3.9 s. The model proposed 26 entries with
-exactly one non-identity mapping — `entity_ref → entity_id` — and it was right. All four gates passed,
+exactly one non-identity mapping — `entity_ref → entity_id` — and it was right. All gates then in place passed,
 1,789 rows recovered, and the run landed on **18/23 with false clear 0/187**: byte-for-byte its
 undrifted figures. Its stated reason cited the *value*, not the column name:
 
@@ -594,7 +595,7 @@ src/recon/
   resolve/tier1.py       variance decomposition against the rate card
   resolve/tier2.py       exact-amount corroboration inside the posting window
   resolve/tier3.py       the fenced adjudicator + the verifier gate
-  resolve/schema_repair.py  the second fenced job: a column mapping, four exact gates
+  resolve/schema_repair.py  the second fenced job: a column mapping, five exact gates
   llm/                   the seam: protocol, cache, null and Anthropic adjudicators
   ledger/statement.py    footing statement + balanced journal entries
   report/                metrics harness and the exception queue
